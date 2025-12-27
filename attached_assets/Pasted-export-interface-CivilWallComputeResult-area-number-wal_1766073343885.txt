@@ -1,0 +1,565 @@
+export interface CivilWallComputeResult {
+  area: number;
+  wallVolume: number;
+  bricks: number;
+  cementBags: number;
+  sandCft: number;
+  gypsumSheets: number;
+  plywoodSheets: number;
+  glassArea: number;
+  framingLength: number; // GI or Wood
+  screws: number;
+  jointCompound: number;
+}
+
+export const computeCivilWallRequired = (
+  wallType: string | null,
+  length: number | null,
+  height: number | null,
+  subOption: string | null,
+  plywoodSelection: any = {}
+): CivilWallComputeResult | null => {
+  if (!wallType || !length || !height) return null;
+
+  const area = length * height;
+  let result: CivilWallComputeResult = {
+    area,
+    wallVolume: 0,
+    bricks: 0,
+    cementBags: 0,
+    sandCft: 0,
+    gypsumSheets: 0,
+    plywoodSheets: 0,
+    glassArea: 0,
+    framingLength: 0,
+    screws: 0,
+    jointCompound: 0
+  };
+
+  if (wallType === "civil") {
+    // Standard Brick Wall Calculation
+    // Thickness: 9 inch (0.75 ft) or 4.5 inch (0.375 ft)
+    const thickness = subOption === "9 inch" ? 0.75 : 0.375;
+    const volume = area * thickness; // Cubic feet
+    result.wallVolume = volume;
+
+    // Standard brick size with mortar: 9"x4.5"x3" approx
+    // Bricks per cubic foot approx 13.5
+    // For 4.5" wall, usually calc by sqft: ~4.5 to 5 bricks per sqft
+    // For 9" wall, ~9-10 bricks per sqft
+    
+    if (subOption === "9 inch") {
+        result.bricks = Math.ceil(area * 10);
+        // Mortar ratio 1:6
+        // Approx 1.5 bags cement per 100 sqft for 9" wall
+        result.cementBags = Math.ceil((area / 100) * 1.5);
+        // Sand: ~18 cft per 100 sqft
+        result.sandCft = Math.ceil((area / 100) * 18);
+    } else {
+        result.bricks = Math.ceil(area * 5);
+        // Mortar ratio 1:4
+        // Approx 0.8 bags cement per 100 sqft
+        result.cementBags = Math.ceil((area / 100) * 0.8);
+        // Sand: ~10 cft per 100 sqft
+        result.sandCft = Math.ceil((area / 100) * 10);
+    }
+  } 
+  else if (wallType === "gypsum") {
+    // Gypsum Partition
+    // Double sided standard: 2 sheets per area (front/back)
+    const sides = subOption === "Double Glazing" ? 2 : 2; // Usually partitions are both sides
+    // Sheet size 6x4 = 24 sqft
+    result.gypsumSheets = Math.ceil((area * sides) / 24);
+    
+    // Framing: GI Channels
+    // Floor + Ceiling track = Length * 2
+    // Vertical studs every 2ft = (Length/2 + 1) * Height
+    const tracks = length * 2;
+    const studs = (Math.ceil(length / 2) + 1) * height;
+    result.framingLength = Math.ceil(tracks + studs);
+    
+    // Screws: ~15 per sheet
+    result.screws = result.gypsumSheets * 15;
+    
+    // Joint compound: ~0.5kg per sheet
+    result.jointCompound = Math.ceil(result.gypsumSheets * 0.5);
+  }
+  else if (wallType === "plywood") {
+    // Plywood Partition
+    // 8x4 sheets = 32 sqft
+    result.plywoodSheets = Math.ceil((area * 2) / 32); // Double sided
+    
+    // Wooden or Aluminium Framing (similar logic to gypsum but different framing material)
+    const tracks = length * 2;
+    const studs = (Math.ceil(length / 2) + 1) * height;
+    result.framingLength = Math.ceil(tracks + studs);
+    
+    result.screws = result.plywoodSheets * 20;
+  }
+  else if (wallType === "gypsum-glass" || wallType === "plywood-glass") {
+    // Mixed
+    // Assume 50-50 split or custom if we had that input, for now assuming 50% glass
+    const solidArea = area * 0.5;
+    const glassPart = area * 0.5;
+    
+    result.glassArea = glassPart;
+    
+    if (wallType.includes("gypsum")) {
+        result.gypsumSheets = Math.ceil((solidArea * 2) / 24);
+    } else {
+        result.plywoodSheets = Math.ceil((solidArea * 2) / 32);
+    }
+    
+    // Framing for whole wall
+    result.framingLength = Math.ceil((length * 2) + ((Math.ceil(length / 2) + 1) * height));
+  }
+
+  return result;
+};
+import { useState } from "react";
+import { Link } from "wouter";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, ChevronRight, ChevronLeft, Calculator } from "lucide-react";
+
+const doorTypes = [
+  { label: "Flush Door", value: "flush" },
+  { label: "Teak Wood Panel Door", value: "teak" },
+  { label: "UPVC Door", value: "upvc" },
+];
+
+const subOptions = {
+    flush: ["Solid Core", "Hollow Core", "Laminated"],
+    teak: ["Carved Design", "Plain Panel", "Glass Panel"],
+    upvc: ["Casement", "Sliding", "Foldable"]
+};
+
+export default function DoorsEstimator() {
+  const [step, setStep] = useState(1);
+  const [type, setType] = useState<string | null>(null);
+  const [subType, setSubType] = useState<string | null>(null);
+  const [inputs, setInputs] = useState({ count: "1", height: "7", width: "3" });
+  const [materials, setMaterials] = useState<any[]>([]);
+
+  const handleNext = () => setStep(prev => prev + 1);
+  const handleBack = () => setStep(prev => prev - 1);
+
+  const calculate = () => {
+    const count = parseInt(inputs.count) || 1;
+    const h = parseFloat(inputs.height) || 7;
+    const w = parseFloat(inputs.width) || 3;
+    
+    let mats = [];
+    
+    // Frame Calculation
+    const frameLength = (2 * h) + w; // 2 sides + 1 top
+    mats.push({ item: "Door Frame (Wood/Metal)", description: `${frameLength} rft per door`, quantity: frameLength * count, unit: "rft" });
+
+    // Door Shutter
+    mats.push({ item: `${subType} Shutter`, description: `${h}x${w} ft`, quantity: count, unit: "nos" });
+
+    // Hardware
+    mats.push({ item: "Hinges (SS 4 inch)", description: "3 per door", quantity: count * 3, unit: "nos" });
+    mats.push({ item: "Tower Bolt", description: "1 per door", quantity: count, unit: "nos" });
+    mats.push({ item: "Door Lock / Handle", description: "Set", quantity: count, unit: "set" });
+    mats.push({ item: "Door Stopper", description: "Magnetic/Rubber", quantity: count, unit: "nos" });
+    
+    if (type === 'flush' || type === 'teak') {
+        mats.push({ item: "Varnish / Polish", description: "Finishing", quantity: count * 0.5, unit: "liters" });
+    }
+
+    setMaterials(mats);
+    handleNext();
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-display text-primary">Door Estimator</h2>
+          <p className="text-muted-foreground">Calculate materials for doors and frames.</p>
+        </div>
+
+        <div className="flex items-center justify-between mb-8 relative">
+           <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-muted z-0"></div>
+           {[1, 2, 3, 4].map((s) => (
+            <div key={s} className={cn("relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 transition-colors duration-300", step >= s ? "bg-primary border-primary text-primary-foreground" : "bg-background border-muted text-muted-foreground")}>
+              {step > s ? <CheckCircle2 className="h-6 w-6" /> : s}
+            </div>
+           ))}
+        </div>
+
+        <Card className="border-border/50 shadow-lg">
+          <CardContent className="p-6">
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 1: Select Door Type</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {doorTypes.map((opt) => (
+                      <Button key={opt.value} variant={type === opt.value ? "default" : "outline"} className={cn("h-20 text-lg justify-start px-6", type === opt.value ? "border-primary bg-primary/10 text-primary" : "")} onClick={() => setType(opt.value)}>
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                   <div className="flex justify-end pt-4"><Button onClick={handleNext} disabled={!type} className="w-32">Next <ChevronRight className="ml-2 h-4 w-4" /></Button></div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 2: Select Style</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {type && subOptions[type as keyof typeof subOptions]?.map((opt) => (
+                      <Button key={opt} variant={subType === opt ? "default" : "outline"} className={cn("h-16 text-lg justify-start px-6", subType === opt ? "border-primary bg-primary/10 text-primary" : "")} onClick={() => setSubType(opt)}>
+                        {opt}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32"><ChevronLeft className="mr-2 h-4 w-4" /> Back</Button>
+                    <Button onClick={handleNext} disabled={!subType} className="w-32">Next <ChevronRight className="ml-2 h-4 w-4" /></Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 3 && (
+                <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 3: Quantity & Size</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                        <Label>Number of Doors</Label>
+                        <Input type="number" value={inputs.count} onChange={(e) => setInputs({...inputs, count: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Height (ft)</Label>
+                        <Input type="number" value={inputs.height} onChange={(e) => setInputs({...inputs, height: e.target.value})} />
+                    </div>
+                     <div className="space-y-2">
+                        <Label>Width (ft)</Label>
+                        <Input type="number" value={inputs.width} onChange={(e) => setInputs({...inputs, width: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32"><ChevronLeft className="mr-2 h-4 w-4" /> Back</Button>
+                    <Button onClick={calculate} className="w-40 bg-green-600 hover:bg-green-700 text-white"><Calculator className="mr-2 h-4 w-4" /> Calculate</Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 4 && (
+                <motion.div key="s4" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                   <div className="text-center space-y-2">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500"><Calculator className="h-8 w-8" /></div>
+                    <h3 className="text-2xl font-bold">Material Requirements</h3>
+                    <p className="text-muted-foreground">Requirements for {inputs.count} doors</p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg border border-border overflow-hidden">
+                    <div className="grid grid-cols-12 bg-muted p-3 text-sm font-medium">
+                        <div className="col-span-8">Item Description</div>
+                        <div className="col-span-4 text-right">Qty</div>
+                    </div>
+                    {materials.map((mat, idx) => (
+                         <div key={idx} className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">{mat.item}</div>
+                                <div className="text-xs text-muted-foreground">{mat.description}</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{mat.quantity.toFixed(1)} <span className="text-xs text-muted-foreground">{mat.unit}</span></div>
+                        </div>
+                    ))}
+                  </div>
+                   <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)} className="w-32">Start Over</Button>
+                    <Link href="/item-master"><Button className="w-48 bg-primary text-primary-foreground">Select Materials <ChevronRight className="ml-2 h-4 w-4" /></Button></Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+}
+import { useState } from "react";
+import { Link } from "wouter";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, ChevronRight, ChevronLeft, Calculator } from "lucide-react";
+
+export default function ElectricalEstimator() {
+  const [step, setStep] = useState(1);
+  const [points, setPoints] = useState({ light: "", fan: "", socket6A: "", socket16A: "", ac: "" });
+  const [materials, setMaterials] = useState<any[]>([]);
+
+  const handleNext = () => setStep(prev => prev + 1);
+  const handleBack = () => setStep(prev => prev - 1);
+
+  const calculate = () => {
+    const light = parseInt(points.light) || 0;
+    const fan = parseInt(points.fan) || 0;
+    const s6 = parseInt(points.socket6A) || 0;
+    const s16 = parseInt(points.socket16A) || 0;
+    const ac = parseInt(points.ac) || 0;
+
+    const totalPoints = light + fan + s6 + s16 + ac;
+    
+    let mats = [];
+    mats.push({ item: "Electrical Wire (1.5 sqmm)", description: "Lighting loops", quantity: totalPoints * 15, unit: "mtr" });
+    mats.push({ item: "Electrical Wire (2.5 sqmm)", description: "Power loops", quantity: (s6 + s16) * 20, unit: "mtr" });
+    mats.push({ item: "Electrical Wire (4.0 sqmm)", description: "AC/Heavy loads", quantity: ac * 25, unit: "mtr" });
+    mats.push({ item: "PVC Conduit Pipe (25mm)", description: "Concealed piping", quantity: totalPoints * 8, unit: "mtr" });
+    mats.push({ item: "Switch Box (Metal/PVC)", description: "Modular boxes", quantity: Math.ceil(totalPoints / 4), unit: "nos" });
+    mats.push({ item: "Modular Switches", description: "6A/16A Switches", quantity: totalPoints, unit: "nos" });
+    mats.push({ item: "Modular Sockets", description: "6A/16A Sockets", quantity: s6 + s16 + ac, unit: "nos" });
+
+    setMaterials(mats);
+    handleNext();
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-display text-primary">Electrical Estimator</h2>
+          <p className="text-muted-foreground">Calculate wiring and switchgear requirements.</p>
+        </div>
+
+        <div className="flex items-center justify-between mb-8 relative">
+           <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-muted z-0"></div>
+           {[1, 2].map((s) => (
+            <div key={s} className={cn("relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 transition-colors duration-300", step >= s ? "bg-primary border-primary text-primary-foreground" : "bg-background border-muted text-muted-foreground")}>
+              {step > s ? <CheckCircle2 className="h-6 w-6" /> : s}
+            </div>
+           ))}
+        </div>
+
+        <Card className="border-border/50 shadow-lg">
+          <CardContent className="p-6">
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 1: Enter Point Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2"><Label>Light Points</Label><Input type="number" value={points.light} onChange={(e) => setPoints({...points, light: e.target.value})} /></div>
+                    <div className="space-y-2"><Label>Fan Points</Label><Input type="number" value={points.fan} onChange={(e) => setPoints({...points, fan: e.target.value})} /></div>
+                    <div className="space-y-2"><Label>6A Sockets (General)</Label><Input type="number" value={points.socket6A} onChange={(e) => setPoints({...points, socket6A: e.target.value})} /></div>
+                    <div className="space-y-2"><Label>16A Sockets (Power)</Label><Input type="number" value={points.socket16A} onChange={(e) => setPoints({...points, socket16A: e.target.value})} /></div>
+                    <div className="space-y-2"><Label>AC Points</Label><Input type="number" value={points.ac} onChange={(e) => setPoints({...points, ac: e.target.value})} /></div>
+                  </div>
+                   <div className="flex justify-end pt-4"><Button onClick={calculate} className="w-40 bg-green-600 hover:bg-green-700 text-white"><Calculator className="mr-2 h-4 w-4" /> Calculate</Button></div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div key="s2" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                   <div className="text-center space-y-2">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500"><Calculator className="h-8 w-8" /></div>
+                    <h3 className="text-2xl font-bold">Material Requirements</h3>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg border border-border overflow-hidden">
+                    <div className="grid grid-cols-12 bg-muted p-3 text-sm font-medium">
+                        <div className="col-span-8">Item Description</div>
+                        <div className="col-span-4 text-right">Qty</div>
+                    </div>
+                    {materials.map((mat, idx) => (
+                         <div key={idx} className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">{mat.item}</div>
+                                <div className="text-xs text-muted-foreground">{mat.description}</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{mat.quantity.toFixed(1)} <span className="text-xs text-muted-foreground">{mat.unit}</span></div>
+                        </div>
+                    ))}
+                  </div>
+                   <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)} className="w-32">Start Over</Button>
+                    <Link href="/item-master"><Button className="w-48 bg-primary text-primary-foreground">Select Materials <ChevronRight className="ml-2 h-4 w-4" /></Button></Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+}import { useState } from "react";
+import { Link } from "wouter";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, ChevronRight, ChevronLeft, Calculator } from "lucide-react";
+
+const ceilingTypes = [
+  { label: "Gypsum False Ceiling", value: "gypsum" },
+  { label: "Grid Ceiling (2x2)", value: "grid" },
+  { label: "PVC Ceiling", value: "pvc" },
+];
+
+const subOptions = {
+    gypsum: ["Plain", "Cove Lighting", "Multi-level"],
+    grid: ["Mineral Fiber", "Metal Perforated", "Gypsum Tiles"],
+    pvc: ["Wood Finish", "Solid Color"]
+};
+
+export default function FalseCeilingEstimator() {
+  const [step, setStep] = useState(1);
+  const [type, setType] = useState<string | null>(null);
+  const [subType, setSubType] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState({ length: "", width: "" });
+  const [materials, setMaterials] = useState<any[]>([]);
+
+  const handleNext = () => setStep(prev => prev + 1);
+  const handleBack = () => setStep(prev => prev - 1);
+
+  const calculate = () => {
+    const l = parseFloat(dimensions.length) || 0;
+    const w = parseFloat(dimensions.width) || 0;
+    const area = l * w;
+    const perimeter = (l + w) * 2;
+
+    let mats = [];
+    
+    if (type === 'gypsum') {
+        mats.push({ item: "Gypsum Boards", description: "Standard 6x4 sheets", quantity: area / 24, unit: "sheets" });
+        mats.push({ item: "GI Channels (Perimeter)", description: "Perimeter channels", quantity: perimeter, unit: "rft" });
+        mats.push({ item: "GI Channels (Intermediate)", description: "Intermediate supports", quantity: area / 2, unit: "rft" }); // approx
+        mats.push({ item: "Drywall Screws", description: "Box of 1000", quantity: area / 100, unit: "box" });
+        mats.push({ item: "Joint Putty", description: "For finishing", quantity: area / 50, unit: "kg" });
+    } else if (type === 'grid') {
+        mats.push({ item: `${subType} Tiles`, description: "2x2 Tiles", quantity: area / 4, unit: "tiles" });
+        mats.push({ item: "Main T-Grid", description: "12ft Runners", quantity: area / 16, unit: "pcs" });
+        mats.push({ item: "Cross T-Grid (4ft)", description: "4ft Cross Tees", quantity: area / 4, unit: "pcs" });
+        mats.push({ item: "Cross T-Grid (2ft)", description: "2ft Cross Tees", quantity: area / 4, unit: "pcs" });
+        mats.push({ item: "Wall Angles", description: "L-Angle for perimeter", quantity: perimeter, unit: "rft" });
+    } else if (type === 'pvc') {
+        mats.push({ item: "PVC Panels", description: "10ft x 10inch panels", quantity: area / 8.33, unit: "pcs" });
+        mats.push({ item: "Framing Channel", description: "Support structure", quantity: area / 3, unit: "rft" });
+    }
+
+    setMaterials(mats);
+    handleNext();
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-display text-primary">False Ceiling Estimator</h2>
+          <p className="text-muted-foreground">Calculate materials required for false ceiling.</p>
+        </div>
+
+        <div className="flex items-center justify-between mb-8 relative">
+           <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-muted z-0"></div>
+           {[1, 2, 3, 4].map((s) => (
+            <div key={s} className={cn("relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 transition-colors duration-300", step >= s ? "bg-primary border-primary text-primary-foreground" : "bg-background border-muted text-muted-foreground")}>
+              {step > s ? <CheckCircle2 className="h-6 w-6" /> : s}
+            </div>
+           ))}
+        </div>
+
+        <Card className="border-border/50 shadow-lg">
+          <CardContent className="p-6">
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 1: Select Ceiling Type</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {ceilingTypes.map((opt) => (
+                      <Button key={opt.value} variant={type === opt.value ? "default" : "outline"} className={cn("h-20 text-lg justify-start px-6", type === opt.value ? "border-primary bg-primary/10 text-primary" : "")} onClick={() => setType(opt.value)}>
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                   <div className="flex justify-end pt-4"><Button onClick={handleNext} disabled={!type} className="w-32">Next <ChevronRight className="ml-2 h-4 w-4" /></Button></div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 2: Select {type} Style</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {type && subOptions[type as keyof typeof subOptions]?.map((opt) => (
+                      <Button key={opt} variant={subType === opt ? "default" : "outline"} className={cn("h-16 text-lg justify-start px-6", subType === opt ? "border-primary bg-primary/10 text-primary" : "")} onClick={() => setSubType(opt)}>
+                        {opt}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32"><ChevronLeft className="mr-2 h-4 w-4" /> Back</Button>
+                    <Button onClick={handleNext} disabled={!subType} className="w-32">Next <ChevronRight className="ml-2 h-4 w-4" /></Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 3 && (
+                <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 3: Dimensions</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                        <Label>Area Length (ft)</Label>
+                        <Input type="number" placeholder="0.00" value={dimensions.length} onChange={(e) => setDimensions({...dimensions, length: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Area Width (ft)</Label>
+                        <Input type="number" placeholder="0.00" value={dimensions.width} onChange={(e) => setDimensions({...dimensions, width: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32"><ChevronLeft className="mr-2 h-4 w-4" /> Back</Button>
+                    <Button onClick={calculate} className="w-40 bg-green-600 hover:bg-green-700 text-white"><Calculator className="mr-2 h-4 w-4" /> Calculate</Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 4 && (
+                <motion.div key="s4" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                   <div className="text-center space-y-2">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500"><Calculator className="h-8 w-8" /></div>
+                    <h3 className="text-2xl font-bold">Material Requirements</h3>
+                    <p className="text-muted-foreground">Calculated quantities for {subType} {type} ceiling</p>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg border border-border overflow-hidden">
+                    <div className="grid grid-cols-12 bg-muted p-3 text-sm font-medium">
+                        <div className="col-span-8">Item Description</div>
+                        <div className="col-span-4 text-right">Qty</div>
+                    </div>
+                    {materials.map((mat, idx) => (
+                         <div key={idx} className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">{mat.item}</div>
+                                <div className="text-xs text-muted-foreground">{mat.description}</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{mat.quantity.toFixed(1)} <span className="text-xs text-muted-foreground">{mat.unit}</span></div>
+                        </div>
+                    ))}
+                  </div>
+                   <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)} className="w-32">Start Over</Button>
+                    <Link href="/item-master"><Button className="w-48 bg-primary text-primary-foreground">Select Materials <ChevronRight className="ml-2 h-4 w-4" /></Button></Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+}

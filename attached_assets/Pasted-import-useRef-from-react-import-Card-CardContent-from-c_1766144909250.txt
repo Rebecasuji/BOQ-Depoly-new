@@ -1,0 +1,248 @@
+import { useRef } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ArrowLeft, Download, Printer } from "lucide-react";
+import type { BOQItem } from "@shared/schema";
+import { componentLabels } from "@/components/app-sidebar";
+
+interface BOQGeneratorProps {
+  items: BOQItem[];
+  onBack: () => void;
+}
+
+export function BOQGenerator({ items, onBack }: BOQGeneratorProps) {
+  const printRef = useRef<HTMLDivElement>(null);
+
+  // --- Compute item total dynamically ---
+  const getItemTotal = (item: BOQItem) => {
+    const it = item as any;
+    switch (item.componentType) {
+      case "gypsum-partition": {
+        const BOARD_AREA_SQFT = 6 * 4;
+        const boardRate = it.boardRate ?? 350;
+        const labourPerBoard = it.labourRate ?? 120;
+        const taxPercent = it.taxPercent ?? 0.0118;
+
+        const areaSqft = it.area || 0;
+        const boardsNeeded = it.boardsNeeded ?? areaSqft / BOARD_AREA_SQFT;
+
+        const workTypeAdjustments: Record<string, number> = {
+          "partition-walls": 1.0,
+          "false-ceiling": 0.9,
+          "decorative-ceiling": 1.3,
+          "plain-ceiling": 1.0,
+          "wall-cladding": 1.15,
+          "cornices": 1.25,
+        };
+        const workAdj = workTypeAdjustments[item.workType ?? "partition-walls"] ?? 1.0;
+
+        const baseMaterial = boardsNeeded * boardRate * workAdj;
+        const baseLabour = boardsNeeded * labourPerBoard;
+
+        const featureCosts = (it.additionalFeatures || []).map(f => {
+          const costMap: Record<string, number> = { "rubber": 50, "metal-edging": 70, "mirror": 100, "wood": 100, "glass": 100 };
+          return costMap[f] || 0;
+        });
+
+        const specialCosts = (it.specialRequirements || []).map(s => {
+          const costMap: Record<string, number> = { "fire-rated": 100, "water-resistant": 80, "eco-friendly": 50, "low-maintenance": 60 };
+          return costMap[s] || 0;
+        });
+
+        const obstacleCost = it.obstacles ? 25 : 0;
+
+        const subtotal = baseMaterial + baseLabour + featureCosts.reduce((a,b)=>a+b,0) + specialCosts.reduce((a,b)=>a+b,0) + obstacleCost;
+        return subtotal + subtotal * taxPercent;
+      }
+
+      default:
+        return item.cost || 0;
+    }
+  };
+
+  const dynamicTotal = items.reduce((sum, item) => sum + getItemTotal(item), 0);
+
+  // --- Professional description with breakdown for gypsum ---
+  const getItemDescription = (item: BOQItem) => {
+    const it = item as any;
+    switch (item.componentType) {
+      case "gypsum-partition": {
+        const BOARD_AREA_SQFT = 6 * 4;
+        const boardRate = it.boardRate ?? 350;
+        const labourPerBoard = it.labourRate ?? 120;
+        const taxPercent = it.taxPercent ?? 0.0118;
+        const areaSqft = it.area || 0;
+        const boardsNeeded = it.boardsNeeded ?? areaSqft / BOARD_AREA_SQFT;
+        const workTypeAdjustments: Record<string, number> = {
+          "partition-walls": 1.0,
+          "false-ceiling": 0.9,
+          "decorative-ceiling": 1.3,
+          "plain-ceiling": 1.0,
+          "wall-cladding": 1.15,
+          "cornices": 1.25,
+        };
+        const workAdj = workTypeAdjustments[it.workType ?? "partition-walls"] ?? 1.0;
+
+        const baseMaterial = boardsNeeded * boardRate * workAdj;
+        const baseLabour = boardsNeeded * labourPerBoard;
+
+        const featureCosts = (it.additionalFeatures || []).map(f => {
+          const costMap: Record<string, number> = { "rubber": 50, "metal-edging": 70, "mirror": 100, "wood": 100, "glass": 100 };
+          return { name: f, cost: costMap[f] || 0 };
+        });
+
+        const specialCosts = (it.specialRequirements || []).map(s => {
+          const costMap: Record<string, number> = { "fire-rated": 100, "water-resistant": 80, "eco-friendly": 50, "low-maintenance": 60 };
+          return { name: s, cost: costMap[s] || 0 };
+        });
+
+        const obstacleCost = it.obstacles ? 25 : 0;
+        const subtotal = baseMaterial + baseLabour + featureCosts.reduce((a,b)=>a+b.cost,0) + specialCosts.reduce((a,b)=>a+b.cost,0) + obstacleCost;
+        const taxAmount = subtotal * taxPercent;
+        const totalCost = subtotal + taxAmount;
+
+        return (
+          <>
+            <div>{it.roomName} - Gypsum Partition {it.thickness}mm ({it.length} x {it.height} {it.unit})</div>
+            <div className="text-xs text-white/60 mt-1 space-y-0.5">
+              <div>Board Type: {it.boardType ?? "standard"}</div>
+              {featureCosts.length > 0 && <div>Features: {featureCosts.map(f=>`${f.name} ₹${f.cost}`).join(", ")}</div>}
+              {specialCosts.length > 0 && <div>Special Requirements: {specialCosts.map(s=>`${s.name} ₹${s.cost}`).join(", ")}</div>}
+              {it.obstacles && <div>Obstacles Handling: ₹{obstacleCost}</div>}
+              <div>Boards Needed: {boardsNeeded.toFixed(2)} | Material: ₹{baseMaterial.toFixed(2)} | Labour: ₹{baseLabour.toFixed(2)}</div>
+              <div>Subtotal: ₹{subtotal.toFixed(2)} | Tax: ₹{taxAmount.toFixed(2)} | Total: ₹{totalCost.toFixed(2)}</div>
+            </div>
+          </>
+        );
+      }
+
+      case "glass":
+        return `Glass Partition ${item.partitionNumber} - ${item.glassType} ${item.thickness}mm ${item.glaze} glaze (${item.length} x ${item.height} ${item.unit})`;
+      case "tiles":
+        return `${item.roomName} - ${item.tileSize} ${item.quality} tiles (${item.length} x ${item.width} ${item.unit})`;
+      case "paint":
+        return `${item.roomName} - ${item.paintType} paint ${item.quality} ${item.coats} coats (${item.totalWallArea} ${item.unit}²)`;
+      case "flooring":
+        return `${item.roomName} - ${item.flooringType} flooring ${item.quality} (${item.length} x ${item.width} ${item.unit})`;
+      case "false-ceiling":
+        return `${item.roomName} - ${item.ceilingType} false ceiling ${item.design} (${item.length} x ${item.width} ${item.unit})`;
+      case "electrical":
+        return `${item.itemName} - ${item.itemType} ${item.quality}`;
+      case "plumbing":
+        return `${item.itemName} - ${item.quantity} ${item.unit} (${item.material})`;
+      
+      case "wall-partition": {
+        const wallType = (item as any).wallType ?? "partition";
+        const partitionType = (item as any).partitionType ?? "standard";
+        return `${item.roomName} - ${wallType} partition ${partitionType} (${item.length} x ${item.height} ${item.unit})`;
+      }
+
+      default:
+        return `${item.roomName || (item as any).itemName || "Item"} - ${item.componentType}`;
+    }
+  };
+
+  const handlePrint = () => window.print();
+  const handleDownload = () => {
+    const printContent = printRef.current?.innerHTML || "";
+    const blob = new Blob([`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>BOQ Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 40px; background-color: #000; color: #fff; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { border: 1px solid #00EFFF; padding: 12px; text-align: left; }
+          th { background-color: #00AEEF; color: #000; }
+        </style>
+      </head>
+      <body>
+        ${printContent}
+      </body>
+      </html>
+    `], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `BOQ_${new Date().toISOString().split("T")[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const currentDate = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+
+  return (
+    <div className="max-w-7xl mx-auto p-6 lg:p-8">
+      <div className="flex items-center justify-between mb-6 print:hidden">
+        <Button variant="outline" onClick={onBack} className="border-cyan-500 text-cyan-400 hover:bg-cyan-500 hover:text-black">
+          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Estimator
+        </Button>
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={handlePrint} className="border-cyan-500 text-cyan-400 hover:bg-cyan-500 hover:text-black">
+            <Printer className="w-4 h-4 mr-2" /> Print
+          </Button>
+          <Button onClick={handleDownload} className="bg-cyan-500 hover:bg-cyan-400 text-black">
+            <Download className="w-4 h-4 mr-2" /> Download
+          </Button>
+        </div>
+      </div>
+
+      <Card className="bg-black text-white border-2 border-cyan-500">
+        <CardContent className="p-8 lg:p-12" ref={printRef}>
+          <div className="text-center mb-8">
+            <h1 className="text-3xl lg:text-4xl font-bold mb-2 text-cyan-400">Bill of Quantities</h1>
+            <p className="text-white/70">Construction Cost Estimate</p>
+            <p className="text-sm text-white/70 mt-2">{currentDate}</p>
+          </div>
+
+          <Separator className="border-cyan-500 mb-8" />
+
+          <div className="border border-cyan-500 rounded-lg overflow-hidden">
+            <Table>
+              <TableHeader className="bg-cyan-500 text-black">
+                <TableRow>
+                  <TableHead className="w-16">S.No</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-32 text-right">Quantity/Area</TableHead>
+                  <TableHead className="w-24 text-right">Unit</TableHead>
+                  <TableHead className="w-32 text-right">Amount (₹)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((item, index) => {
+                  const it = item as any;
+                  const qtyDisplay = (typeof it.area === "number") ? it.area.toFixed(2) : (it.quantity ?? "-");
+                  const unitDisplay = it.unit ?? (typeof it.area === "number" ? "m²" : "nos");
+                  return (
+                    <TableRow key={it.id ?? index} className="hover:bg-cyan-900/50 align-top">
+                      <TableCell className="font-medium">{index + 1}</TableCell>
+                      <TableCell className="text-sm">{getItemDescription(item)}</TableCell>
+                      <TableCell className="text-right">{qtyDisplay}</TableCell>
+                      <TableCell className="text-right">{unitDisplay}</TableCell>
+                      <TableCell className="text-right font-semibold text-cyan-400">
+                        {getItemTotal(item).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                <TableRow className="bg-cyan-900/50">
+                  <TableCell colSpan={4} className="text-right font-bold text-lg text-white">
+                    Grand Total
+                  </TableCell>
+                  <TableCell className="text-right font-bold text-lg text-cyan-400">
+                    ₹{dynamicTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

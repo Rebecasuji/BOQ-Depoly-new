@@ -1,0 +1,232 @@
+// src/components/estimators/Step5Summary.tsx
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { WallType } from "./constants";
+
+interface MaterialSelection {
+  type: string;
+  unit: string;
+  quantity: number;
+  rate?: number;
+}
+
+interface Props {
+  wallType: WallType | null;
+  subOption: string | null;
+  length: number | null;
+  height: number | null;
+  materials: MaterialSelection[];
+  liveStatus: Record<string, { ok: boolean; message?: string }>;
+  handleBack: () => void;
+  handleSubmit: () => void;
+  handleUpdateMaterials: (updated: MaterialSelection[]) => void;
+  brickWastage: number;
+  plywoodSelection?: {
+    plywoodType?: string;
+    glazing?: string;
+    glassType?: string;
+    finish?: string;
+    layering?: string;
+    frame?: string;
+    beeding?: string;
+  };
+}
+
+const getOptionRate = (option: string) => {
+  const rates: Record<string, number> = {
+    "Clear Glass": 1200,
+    "Toughened Glass": 1800,
+    "Fully Frosted": 1500,
+    "Rubber Beeding": 50,
+    "Wooden Beeding": 100,
+    "Laminate Finish": 500,
+    "Paint Finish": 300,
+    "Aluminium Frame": 2000,
+    "Wooden Frame": 1800,
+    "Commercial 8/4": 500,
+    "Marine 8/4": 550,
+    "BWP 8/4": 600,
+    "BWR 8/4": 650,
+  };
+  return rates[option] ?? 0;
+};
+
+export default function Step5Summary({
+  wallType,
+  subOption,
+  length,
+  height,
+  materials,
+  liveStatus,
+  handleBack,
+  handleSubmit,
+  handleUpdateMaterials,
+  brickWastage,
+  plywoodSelection = {},
+}: Props) {
+  if (!wallType) return <div className="text-white">No wall type selected.</div>;
+
+  const isPlywoodGlass = wallType === "plywood-glass" || wallType === "gypsum-glass";
+
+  // Include selected options for Plywood+Glass / Gypsum+Glass
+  const optionMaterials: MaterialSelection[] = [];
+  if (plywoodSelection && isPlywoodGlass) {
+    ["plywoodType", "glassType", "beeding", "finish", "frame"].forEach((key) => {
+      const val = (plywoodSelection as any)[key];
+      if (val) {
+        optionMaterials.push({
+          type: val,
+          quantity: 1,
+          unit: "pcs",
+          rate: getOptionRate(val),
+        });
+      }
+    });
+  }
+
+  const additionalCharges = [
+    "Hardware",
+    "Loading & Unloading",
+    "Transport",
+    "Labour Charges"
+  ];
+
+  // Only show what user selected + Plywood/Glass options
+  const mainMaterials = [
+    ...materials.filter(m => !additionalCharges.includes(m.type)),
+    ...optionMaterials
+  ];
+  const extraMaterials = materials.filter(m => additionalCharges.includes(m.type));
+
+  // Handlers for editable inputs
+  const handleMaterialChange = (type: string, quantity: number, rate: number) => {
+    const updated = materials.map((m) =>
+      m.type === type ? { ...m, quantity, rate } : m
+    );
+    handleUpdateMaterials(updated);
+  };
+
+  const mainTotal = mainMaterials.reduce((sum, m) => sum + m.quantity * (m.rate || 0), 0);
+  const extraTotal = extraMaterials.reduce((sum, m) => sum + m.quantity * (m.rate || 0), 0);
+  const grandTotal = mainTotal + extraTotal;
+
+  const missingMaterials = Object.entries(liveStatus).filter(([_, status]) => !status.ok);
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xl font-bold text-cyan-400">Cost Summary</h3>
+
+      {missingMaterials.length > 0 && (
+        <div className="bg-yellow-100 text-black p-3 rounded-md">
+          <strong className="text-yellow-800">Missing / Insufficient materials:</strong>
+          <ul>
+            {missingMaterials.map(([key, status]) => (
+              <li key={key}>{key}: {status.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* MAIN MATERIALS */}
+      <div className="bg-white text-black p-3 rounded-md">
+        <h4 className="text-lg font-semibold mb-2">Materials Cost</h4>
+
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b">
+              <th className="py-1 px-2">Material</th>
+              <th className="py-1 px-2">Qty</th>
+              <th className="py-1 px-2">Rate</th>
+              <th className="py-1 px-2">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mainMaterials.map((m, idx) => {
+              const total = m.quantity * (m.rate || 0);
+              return (
+                <tr key={idx} className="border-b">
+                  <td className="py-1 px-2">{m.type}</td>
+                  <td className="py-1 px-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={m.quantity}
+                      onChange={(e) => handleMaterialChange(m.type, Number(e.target.value || 0), m.rate ?? 0)}
+                      className="w-20 text-black"
+                    />
+                  </td>
+                  <td className="py-1 px-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={m.rate ?? 0}
+                      onChange={(e) => handleMaterialChange(m.type, m.quantity, Number(e.target.value || 0))}
+                      className="w-20 text-black"
+                    />
+                  </td>
+                  <td className="py-1 px-2">{total.toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* ADDITIONAL CHARGES */}
+        {extraMaterials.length > 0 && (
+          <>
+            <h4 className="text-lg font-semibold mt-4 mb-2">Additional Charges</h4>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b">
+                  <th className="py-1 px-2">Type</th>
+                  <th className="py-1 px-2">Qty</th>
+                  <th className="py-1 px-2">Rate</th>
+                  <th className="py-1 px-2">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {extraMaterials.map((m, idx) => {
+                  const total = m.quantity * (m.rate || 0);
+                  return (
+                    <tr key={idx} className="border-b">
+                      <td className="py-1 px-2">{m.type}</td>
+                      <td className="py-1 px-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={m.quantity}
+                          onChange={(e) => handleMaterialChange(m.type, Number(e.target.value || 0), m.rate ?? 0)}
+                          className="w-20 text-black"
+                        />
+                      </td>
+                      <td className="py-1 px-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={m.rate ?? 0}
+                          onChange={(e) => handleMaterialChange(m.type, m.quantity, Number(e.target.value || 0))}
+                          className="w-20 text-black"
+                        />
+                      </td>
+                      <td className="py-1 px-2">{total.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        <div className="flex justify-between font-bold text-lg mt-4">
+          <span>Total Cost:</span>
+          <span>₹{grandTotal.toFixed(2)}</span>
+        </div>
+      </div>
+
+      <div className="flex gap-2 mt-4">
+        <Button onClick={handleBack} className="bg-cyan-500 text-black w-1/2">← Back</Button>
+        <Button onClick={handleSubmit} className="bg-cyan-500 text-black w-1/2">Confirm & Add Wall Partition</Button>
+      </div>
+    </div>
+  );
+}

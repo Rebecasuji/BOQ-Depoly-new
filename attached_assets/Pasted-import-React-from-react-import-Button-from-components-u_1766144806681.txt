@@ -1,0 +1,311 @@
+import React from "react";
+import { Button } from "@/components/ui/button";
+import { WallType } from "./constants";
+
+interface Props {
+  wallType: WallType;
+  subOption: string | null;
+  setSubOption: (val: string | null) => void;
+  handleNext: () => void;
+  handleBack: () => void;
+  plywoodSelection?: {
+    glassType?: string;
+    glazing?: string;
+    plywoodType?: string;
+    layering?: string;
+    beading?: string;
+    finish?: string;
+    frame?: string;
+  };
+  setPlywoodSelection?: (val: {
+    glassType?: string;
+    glazing?: string;
+    plywoodType?: string;
+    layering?: string;
+    beading?: string;
+    finish?: string;
+    frame?: string;
+  }) => void;
+  setMaterials?: (val: any) => void; // setter for materials
+}
+
+const subOptionsMap: Partial<Record<WallType, string[]>> = {
+  civil: ["9 inch", "4.5 inch"],
+  gypsum: ["Single Glazing", "Double Glazing"],
+};
+
+const plywoodTypes = ["Commercial 8/4", "Marine 8/4", "BWP 8/4", "BWR 8/4"];
+const glazingOptions = ["Single Glazing", "Double Glazing"];
+const glassTypes = ["Clear Glass", "Toughened Glass", "Fully Frosted"];
+const finishOptions = ["Laminate Finish", "Paint Finish"];
+const beadingOptions = ["Rubber Beeding", "Wooden Beeding"];
+const frameOptions = ["Aluminium Frame", "Wooden Frame"];
+
+// Helper for rates
+const getOptionRate = (option: string) => {
+  const rates: Record<string, number> = {
+    "Clear Glass": 1200,
+    "Toughened Glass": 1800,
+    "Fully Frosted": 1500,
+    "Rubber Beeding": 50,
+    "Wooden Beeding": 100,
+    "Laminate Finish": 500,
+    "Paint Finish": 300,
+    "Aluminium Frame": 2000,
+    "Wooden Frame": 1800,
+  };
+  return rates[option] ?? 0;
+};
+
+export default function Step2SubOptions({
+  wallType,
+  subOption,
+  setSubOption,
+  handleNext,
+  handleBack,
+  plywoodSelection,
+  setPlywoodSelection,
+  setMaterials,
+}: Props) {
+  // --- GYPSUM-GLASS and PLYWOOD-GLASS SELECTIONS ---
+  if (wallType === "plywood-glass" || wallType === "gypsum-glass") {
+    const isPlywoodGlass = wallType === "plywood-glass";
+
+    const allSelected =
+      plywoodSelection?.glazing &&
+      plywoodSelection?.glassType &&
+      plywoodSelection?.beading &&
+      plywoodSelection?.finish &&
+      plywoodSelection?.frame &&
+      (!isPlywoodGlass || plywoodSelection?.plywoodType);
+
+    const handleOptionSelect = (key: string, value: string) => {
+      setPlywoodSelection?.({ ...plywoodSelection, [key]: value });
+
+      // Add to materials automatically, **skip glazing**
+      if (setMaterials && key !== "glazing") {
+        setMaterials((prev: any) => {
+          const exists = prev.find((m: any) => m.type === value);
+          if (exists)
+            return prev.map((m: any) =>
+              m.type === value ? { ...m, quantity: 1, unit: "pcs", rate: getOptionRate(value) } : m
+            );
+          return [...prev, { type: value, quantity: 1, unit: "pcs", rate: getOptionRate(value) }];
+        });
+      }
+    };
+
+    return (
+      <div className="space-y-4 p-4 bg-gray-700 rounded">
+        <h3 className="font-semibold text-white">
+          Select {isPlywoodGlass ? "Plywood + Glass" : "Gypsum + Glass"} Options
+        </h3>
+
+        {/* Plywood Type - ONLY FOR PLYWOOD-GLASS */}
+        {isPlywoodGlass && (
+          <div className="flex flex-col gap-2">
+            <label>Plywood Type:</label>
+            {plywoodTypes.map((type) => (
+              <Button
+                key={type}
+                onClick={() => handleOptionSelect("plywoodType", type)}
+                className={`w-full ${
+                  plywoodSelection?.plywoodType === type ? "bg-cyan-500 text-black" : "bg-white text-black"
+                }`}
+              >
+                {type}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {/* Glazing */}
+        <div className="flex flex-col gap-2 mt-2">
+          <label>Glazing:</label>
+          {glazingOptions.map((g) => (
+            <Button
+              key={g}
+              onClick={() => handleOptionSelect("glazing", g)}
+              className={`w-full ${
+                plywoodSelection?.glazing === g ? "bg-cyan-500 text-black" : "bg-white text-black"
+              }`}
+            >
+              {g}
+            </Button>
+          ))}
+        </div>
+
+        {/* Glass Type */}
+        <div className="flex flex-col gap-2 mt-2">
+          <label>Glass Type:</label>
+          {glassTypes.map((g) => (
+            <Button
+              key={g}
+              onClick={() => handleOptionSelect("glassType", g)}
+              className={`w-full ${
+                plywoodSelection?.glassType === g ? "bg-cyan-500 text-black" : "bg-white text-black"
+              }`}
+            >
+              {g}
+            </Button>
+          ))}
+        </div>
+
+        {/* Beeding / Profile */}
+        <div className="flex flex-col gap-2 mt-2">
+          <label>Beeding / Profile:</label>
+          {beadingOptions.map((b) => (
+            <Button
+              key={b}
+              onClick={() => handleOptionSelect("beading", b)}
+              className={`w-full ${
+                plywoodSelection?.beading === b ? "bg-cyan-500 text-black" : "bg-white text-black"
+              }`}
+            >
+              {b}
+            </Button>
+          ))}
+        </div>
+
+        {/* Finish */}
+        <div className="flex flex-col gap-2 mt-2">
+          <label>Finish:</label>
+          {finishOptions.map((f) => (
+            <Button
+              key={f}
+              onClick={() => handleOptionSelect("finish", f)}
+              className={`w-full ${
+                plywoodSelection?.finish === f ? "bg-cyan-500 text-black" : "bg-white text-black"
+              }`}
+            >
+              {f}
+            </Button>
+          ))}
+        </div>
+
+        {/* Frame */}
+        <div className="flex flex-col gap-2 mt-2">
+          <label>Frame:</label>
+          {frameOptions.map((f) => (
+            <Button
+              key={f}
+              onClick={() => handleOptionSelect("frame", f)}
+              className={`w-full ${
+                plywoodSelection?.frame === f ? "bg-cyan-500 text-black" : "bg-white text-black"
+              }`}
+            >
+              {f}
+            </Button>
+          ))}
+        </div>
+
+        {/* Navigation */}
+        <div className="flex gap-2 mt-4">
+          <Button onClick={handleBack} className="bg-gray-500 text-black w-1/2">
+            Back
+          </Button>
+          <Button
+            onClick={() => {
+              if (wallType === "gypsum-glass") {
+                setSubOption(
+                  `Gypsum + Glass - ${plywoodSelection?.glassType ?? ""}`
+                );
+              } else if (wallType === "plywood-glass") {
+                setSubOption(
+                  `Plywood + Glass - ${plywoodSelection?.glassType ?? ""}`
+                );
+              }
+              handleNext();
+            }}
+            className={`bg-cyan-500 text-black w-1/2 ${!allSelected ? "opacity-50 pointer-events-none" : ""}`}
+            disabled={!allSelected}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ****** OTHER WALL TYPES (Civil, Gypsum, Plywood, Gypsum-Plywood) ******
+  let options: string[] = [];
+  let header = "Select Option:";
+
+  if (wallType === "plywood" || wallType === "gypsum-plywood") {
+    header = !plywoodSelection?.plywoodType ? "Select Plywood Type:" : "Select Glazing:";
+    options = !plywoodSelection?.plywoodType ? plywoodTypes : glazingOptions;
+  } else {
+    options = subOptionsMap[wallType] || [];
+  }
+
+  if (!options.length) return null;
+
+  const isNextDisabled =
+    (wallType === "plywood" || wallType === "gypsum-plywood") && !plywoodSelection?.glazing;
+
+  return (
+    <div className="space-y-2">
+      <p className="font-semibold text-white">{header}</p>
+      <div className="flex flex-col gap-2">
+        {options.map((opt) => (
+          <Button
+            key={opt}
+            onClick={() => {
+
+
+              // CIVIL FIX ✔
+              if (wallType === "civil") {
+                setSubOption(opt); // "9 inch" or "4.5 inch"
+                return;
+              }
+
+              if ((wallType === "plywood" || wallType === "gypsum-plywood") && !plywoodSelection?.plywoodType) {
+                setPlywoodSelection?.({ ...(plywoodSelection || {}), plywoodType: opt, glazing: undefined });
+                setSubOption(null);
+              } else if ((wallType === "plywood" || wallType === "gypsum-plywood") && plywoodSelection?.plywoodType) {
+                setPlywoodSelection?.({ ...(plywoodSelection || {}), glazing: opt });
+                if (wallType === "gypsum-plywood") {
+                  setSubOption(`Gypsum + Plywood - ${plywoodSelection?.plywoodType ?? opt} + ${opt}`);
+                } else {
+                  setSubOption(opt);
+                }
+              } else {
+                setSubOption(opt);
+              }
+            }}
+            className={`w-full text-black ${
+              subOption === opt || plywoodSelection?.plywoodType === opt || plywoodSelection?.glazing === opt
+                ? "bg-cyan-500"
+                : "bg-white"
+            }`}
+          >
+            {opt}
+          </Button>
+        ))}
+      </div>
+
+      <div className="flex gap-2 mt-2">
+        <Button
+          onClick={() => {
+            if ((wallType === "plywood" || wallType === "gypsum-plywood") && plywoodSelection?.glazing) {
+              setPlywoodSelection?.({ ...plywoodSelection, glazing: undefined });
+              setSubOption(null);
+              return;
+            }
+            handleBack();
+          }}
+          className="bg-gray-200 text-black w-1/2"
+        >
+          Back
+        </Button>
+        <Button
+          onClick={handleNext}
+          className={`bg-cyan-500 text-black w-1/2 ${isNextDisabled ? "opacity-50 pointer-events-none" : ""}`}
+          disabled={isNextDisabled}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}

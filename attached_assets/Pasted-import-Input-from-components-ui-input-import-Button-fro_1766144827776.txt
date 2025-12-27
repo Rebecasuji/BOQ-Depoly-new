@@ -1,0 +1,136 @@
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+interface Props {
+  length: number | null;
+  height: number | null;
+  setLength: (val: number) => void;
+  setHeight: (val: number) => void;
+  wallType?: import("./constants").WallType | null;
+  glassHeight?: number | null;
+  setGlassHeight?: (val: number) => void;
+
+  // NEWLY ADDED
+  glassLength?: number | null;
+  setGlassLength?: (val: number) => void;
+
+  handleNext: () => void;
+  handleBack: () => void;
+}
+
+export default function Step3Dimensions({
+  length,
+  height,
+  setLength,
+  setHeight,
+  wallType,
+  glassHeight,
+  setGlassHeight,
+
+  // NEW Props
+  glassLength,
+  setGlassLength,
+
+  handleNext,
+  handleBack,
+}: Props) {
+  return (
+    <div className="space-y-2">
+      <p className="font-semibold text-white">Enter Wall Dimensions (in ft):</p>
+
+      {wallType === "gypsum-glass" || wallType === "plywood-glass" ? (
+        <div className="flex flex-col gap-2">
+
+          {/* Total Wall Height */}
+          <div>
+            <p className="text-sm text-white">Total Wall Height</p>
+            <Input
+              type="number"
+              placeholder="Height"
+              value={height ?? ""}
+              onChange={(e) => setHeight(Number(e.target.value))}
+              className="w-1/2 text-black"
+            />
+          </div>
+
+          {/* Glass Height */}
+          <div>
+            <p className="text-sm text-white">Glass Height</p>
+            <Input
+              type="number"
+              placeholder="Glass Height"
+              value={glassHeight ?? ""}
+              onChange={(e) =>
+                setGlassHeight && setGlassHeight(Number(e.target.value))
+              }
+              className="w-1/2 text-black"
+            />
+            {height != null && glassHeight != null && (
+              <p className="text-xs text-gray-400 mt-2">
+                Plywood Height = {Math.max(height - glassHeight, 0)} ft
+              </p>
+            )}
+          </div>
+
+          {/* Glass Length */}
+          <div>
+            <p className="text-sm text-white">Glass Length</p>
+            <Input
+              type="number"
+              placeholder="Glass Length"
+              value={glassLength ?? ""}
+              onChange={(e) =>
+                setGlassLength && setGlassLength(Number(e.target.value))
+              }
+              className="w-1/2 text-black"
+            />
+            {length != null && glassLength != null && (
+              <p className="text-xs text-gray-400 mt-2">
+                Plywood Length = {Math.max(length - glassLength, 0)} ft
+              </p>
+            )}
+          </div>
+
+          {/* Wall Length */}
+          <div>
+            <p className="text-sm text-white">Wall Length</p>
+            <Input
+              type="number"
+              placeholder="Length"
+              value={length ?? ""}
+              onChange={(e) => setLength(Number(e.target.value))}
+              className="w-1/2 text-black"
+            />
+          </div>
+        </div>
+      ) : (
+        /* Normal Wall (No Glass) */
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            placeholder="Length"
+            value={length ?? ""}
+            onChange={(e) => setLength(Number(e.target.value))}
+            className="w-1/2 text-black"
+          />
+          <Input
+            type="number"
+            placeholder="Height"
+            value={height ?? ""}
+            onChange={(e) => setHeight(Number(e.target.value))}
+            className="w-1/2 text-black"
+          />
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-2">
+        <Button onClick={handleBack} className="bg-gray-500 text-black">
+          Back
+        </Button>
+        <Button onClick={handleNext} className="bg-cyan-500 text-black">
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,350 @@
+// src/estimators/WallPartitionWorkflow.tsx
+import { useState, useEffect, useMemo } from "react";
+import Step1WallType from "./Step1WallType";
+import Step2SubOptions from "./Step2SubOptions";
+import Step3Dimensions from "./Step3Dimensions";
+import Step4Materials from "./Step4Materials";
+import Step5Summary from "./Step5Summary";
+
+import { WallType, subOptionsMap } from "./constants";
+import computeRequired from "./computeRequired";
+import { v4 as uuidv4 } from "uuid";
+import { Button } from "@/components/ui/button";
+
+interface MaterialSelection {
+  type: string;
+  unit: string;
+  quantity: number;
+  rate?: number;
+}
+
+interface Props {
+  onAddItem: (item: any) => void;
+}
+
+export function WallPartitionWorkflow({ onAddItem }: Props) {
+  const [step, setStep] = useState(1);
+  const [wallType, setWallType] = useState<WallType | null>(null);
+  const [subOption, setSubOption] = useState<string | null>(null);
+  const [length, setLength] = useState<number | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  const [glassLength, setGlassLength] = useState<number | null>(null); // ✅ Added
+  const [glassHeight, setGlassHeight] = useState<number | null>(null);
+  const [materials, setMaterials] = useState<MaterialSelection[]>([]);
+  const [liveStatus, setLiveStatus] = useState<Record<string, { ok: boolean; message?: string }>>({});
+  const [brickWastage, setBrickWastage] = useState(0);
+
+  const [plywoodSelection, setPlywoodSelection] = useState<{
+    plywoodType?: string;
+    glazing?: string;
+    glassType?: string;
+    finish?: string;
+    layering?: string;
+    beading?: string;
+    frame?: string;
+  }>({});
+
+  // ---------------- HANDLE NEXT & BACK ----------------
+  const handleNext = () => setStep((s) => s + 1);
+  const handleBack = () => setStep((s) => s - 1);
+
+  // ---------------- SUBMIT ----------------
+  const handleSubmitFinal = () => setStep(5);
+
+  const handleValidatedSubmitFinal = () => {
+    if (!length || !height || (wallType === "plywood-glass" && !glassHeight)) {
+      alert("Please enter all dimensions before viewing the summary.");
+      return;
+    }
+    setStep(5);
+  };
+
+  const handleSubmit = () => {
+    if (!wallType || !length || !height || (wallType === "plywood-glass" && !glassHeight)) {
+      alert("Please fill all required fields");
+      return;
+    }
+
+    const cost = materials.reduce((sum, m) => sum + m.quantity * (m.rate || 0), 0);
+
+    const newItem = {
+      id: uuidv4(),
+      componentType: "wall-partition",
+      wallType,
+      subOption:
+        wallType === "plywood" || wallType === "plywood-glass"
+          ? `${plywoodSelection.plywoodType} - ${plywoodSelection.glazing}`
+          : subOption,
+      length,
+      height,
+      materials,
+      brickWastage,
+      cost,
+    };
+
+    onAddItem(newItem);
+
+    // Reset workflow
+    setStep(1);
+    setWallType(null);
+    setSubOption(null);
+    setLength(null);
+    setHeight(null);
+    setGlassHeight(null);
+    setMaterials([]);
+    setLiveStatus({});
+    setBrickWastage(0);
+    setPlywoodSelection({});
+  };
+
+  // Auto-skip Step 2 if no subOptions (Civil / Gypsum)
+  useEffect(() => {
+    if (step === 2 && wallType && !subOptionsMap[wallType]?.length) handleNext();
+  }, [step, wallType]);
+
+  // ---------------- COMPUTE PLYWOOD-GLASS MATERIALS ----------------
+ const req = useMemo(() => {
+  // -------------------- GYPSUM + GLASS --------------------
+  if (
+    wallType === "gypsum-glass" &&
+    length != null &&
+    height != null &&
+    glassHeight != null &&
+    glassLength != null
+  ) {
+    return computeRequired(
+      "gypsum-glass",
+      length,
+      height,
+      undefined,
+      subOption ?? "Single Layer",
+      brickWastage,
+      undefined,
+      glassHeight,
+      glassLength,
+      undefined
+      
+    );
+  }
+
+  // -------------------- PLYWOOD + GLASS --------------------
+  if (
+    wallType === "plywood-glass" &&
+    length != null &&
+    height != null &&
+    glassHeight != null &&
+    plywoodSelection.plywoodType
+  ) {
+    return computeRequired(
+      "plywood-glass",
+      length,
+      height,
+      undefined,
+      plywoodSelection.glazing ?? "Single Glazing",
+      undefined,
+      plywoodSelection.plywoodType,
+      glassHeight,
+      glassLength,
+      plywoodSelection.layering ?? "Single"
+      
+    );
+  }
+
+  return null;
+}, [wallType, length, height, glassHeight, glassLength, plywoodSelection, subOption, brickWastage]);
+
+
+  // ---------------- RENDER ----------------
+  return (
+    <div className="bg-black text-white p-6 rounded-lg space-y-6">
+      <h2 className="text-2xl font-bold text-cyan-400">Wall Partition Estimator</h2>
+
+      {/* Step 1 */}
+      {step === 1 && <Step1WallType wallType={wallType} setWallType={setWallType} handleNext={handleNext} />}
+
+      {/* Step 2 */}
+      {step === 2 &&
+        (wallType === "plywood-glass" ? (
+          <div className="space-y-4 p-4 bg-gray-700 rounded">
+            <h3 className="font-semibold text-white">Select Plywood + Glass Options</h3>
+
+            {/* Plywood Type */}
+            <div className="flex flex-col gap-2">
+              <label>Plywood Type:</label>
+              {["Commercial 8/4", "Marine 8/4", "BWP 8/4", "BWR 8/4"].map((type) => (
+                <Button
+                  key={type}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, plywoodType: type })}
+                  className={`w-full ${
+                    plywoodSelection.plywoodType === type ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {type}
+                </Button>
+              ))}
+            </div>
+
+            {/* Glazing */}
+            <div className="flex flex-col gap-2 mt-2">
+              <label>Glazing:</label>
+              {["Single Glazing", "Double Glazing"].map((g) => (
+                <Button
+                  key={g}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, glazing: g })}
+                  className={`w-full ${
+                    plywoodSelection.glazing === g ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {g}
+                </Button>
+              ))}
+            </div>
+
+            {/* Glass Type */}
+            <div className="flex flex-col gap-2 mt-2">
+              <label>Glass Type:</label>
+              {["Clear Glass", "Toughened Glass", "Fully Frosted"].map((g) => (
+                <Button
+                  key={g}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, glassType: g })}
+                  className={`w-full ${
+                    plywoodSelection.glassType === g ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {g}
+                </Button>
+              ))}
+            </div>
+
+            {/* Beading / Profile */}
+            <div className="flex flex-col gap-2 mt-2">
+              <label>Beeding / Profile:</label>
+              {["Rubber Beeding", "Wooden Beeding"].map((b) => (
+                <Button
+                  key={b}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, beading: b })}
+                  className={`w-full ${
+                    plywoodSelection.beading === b ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {b}
+                </Button>
+              ))}
+            </div>
+
+            {/* Finish */}
+            <div className="flex flex-col gap-2 mt-2">
+              <label>Finish:</label>
+              {["Laminate Finish", "Paint Finish"].map((f) => (
+                <Button
+                  key={f}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, finish: f })}
+                  className={`w-full ${
+                    plywoodSelection.finish === f ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {f}
+                </Button>
+              ))}
+            </div>
+
+            {/* Frame */}
+            <div className="flex flex-col gap-2 mt-2">
+              <label>Frame:</label>
+              {["Aluminium Frame", "Wooden Frame"].map((f) => (
+                <Button
+                  key={f}
+                  onClick={() => setPlywoodSelection({ ...plywoodSelection, frame: f })}
+                  className={`w-full ${
+                    plywoodSelection.frame === f ? "bg-cyan-500 text-black" : "bg-white text-black"
+                  }`}
+                >
+                  {f}
+                </Button>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mt-4">
+              <Button onClick={handleBack} className="bg-gray-500 text-black">Back</Button>
+              {plywoodSelection.plywoodType && plywoodSelection.glazing && plywoodSelection.glassType && plywoodSelection.finish && plywoodSelection.frame && plywoodSelection.beading && (
+                <Button onClick={handleNext} className="bg-cyan-500 text-black">Next</Button>
+              )}
+            </div>
+          </div>
+        ) : (
+          wallType && (
+  <Step2SubOptions
+    wallType={wallType}
+    subOption={subOption}
+    setSubOption={setSubOption}
+    plywoodSelection={plywoodSelection}
+    setPlywoodSelection={setPlywoodSelection}
+    setMaterials={setMaterials}   // <-- add this line
+    handleNext={handleNext}
+    handleBack={handleBack}
+  />
+)
+
+        ))}
+
+      {/* Step 3 */}
+      {step === 3 && (
+        <Step3Dimensions
+          wallType={wallType}
+          length={length}
+          height={height}
+          setLength={setLength}
+          setHeight={setHeight}
+          glassHeight={glassHeight}
+          setGlassHeight={setGlassHeight}
+           glassLength={glassLength} // ✅ Add
+          setGlassLength={setGlassLength} // ✅ Add
+          handleNext={handleNext}
+          handleBack={handleBack}
+        />
+      )}
+
+      {/* Step 4 */}
+      {step === 4 && (
+        <Step4Materials
+          wallType={wallType}
+          subOption={wallType === "plywood" ? plywoodSelection.glazing ?? null : subOption}
+          length={length}
+          height={height}
+          glassHeight={glassHeight}
+          glassLength={glassLength}   // ✅ FIXED — MUST BE INCLUDED
+          materials={materials}
+          setMaterials={setMaterials}
+          brickWastage={brickWastage}
+          setBrickWastage={setBrickWastage}
+          liveStatus={liveStatus}
+          setLiveStatus={setLiveStatus}
+          handleBack={handleBack}
+          handleSubmitFinal={handleValidatedSubmitFinal}
+          handleSubmit={handleSubmit}
+          plywoodSelection={plywoodSelection}
+          req={req} // pass computed plywood-glass materials
+          
+        />
+      )}
+
+      {/* Step 5 */}
+      {step === 5 && (
+        <Step5Summary
+          wallType={wallType}
+          subOption={wallType === "plywood" ? `${plywoodSelection.plywoodType} - ${plywoodSelection.glazing}` : subOption}
+          length={length}
+          height={height}
+          materials={materials}
+          liveStatus={liveStatus}
+          handleBack={() => setStep(4)}
+          handleSubmit={handleSubmit}
+          brickWastage={brickWastage}
+          handleUpdateMaterials={setMaterials} // ✅ Add this line
+          plywoodSelection={plywoodSelection}  // <--- ADD THIS
+          req={req}   
+        />
+      )}
+    </div>
+  );
+}

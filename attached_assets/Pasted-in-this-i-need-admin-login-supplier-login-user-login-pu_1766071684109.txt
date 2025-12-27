@@ -1,0 +1,37 @@
+in this i need admin login,supplier login,user login purchase team login,software team login with correct authentication and for new signup options also need and if the user logins means all the estimators that is estimator page should only be displayed admin logins means both estimator and in signup it should ask for are you a client or supplier then it should go based on that and the admin and software team has all the pages access and if the purchase team logins means they can add the shops and materials login and signup should be with full authentication  next in this existing there is option like upto dimensions ok after dimension i need one step thet is it should list all the materials related to the user selection that  like if flush door means in the item master what are the materials under the flush door category like door handle,hinges,etc like which all suits for the flush store also available in the item master should be listed in that step and that if for that material technical specification is given that  should also shown there if user needs to know about means they clicks on that means a small white box with that detail should be shown with wrong option with the check boxes user can select and after that user selection of materials it should calculate and say the materials required based on the dimensions if user need to add any others or missed anything means they can add again and should show the user selected  materials with the cost shop name it it is available it should select that material from the store with less cost and if user not like from that store means they can also change that and after that boq should be generated finally it should  have the pdf option also use real time boq template and next dor add shop   Shop Name e.g. City Hardware Location e.g. Downtown Phone(with country code)  Contact Number City State Country Pincode/zipcode, gstno(optional) these are needed and if the supplier clicks on add shop means the request meassage should be send to the software team so that there should be separate page for software team for manageing activites if the supplier add the shop means then the message should trigger to the software team and admin dashboard and the can approve are reject and if apporved means only it should be added and once the shop is added means that is approved means the supplier can login into their shops inside that they can add the materials  and for add material the field include Material Name 
+
+ 
+
+Item Code( should auto generate base on the material name) 
+
+(SKU / Code) 
+
+Rate (₹)
+
+0.00
+
+Brand Name
+
+Model Number
+
+Unit-dropdown 
+
+ 
+
+Category dropdowm 
+
+ 
+
+Sub Category
+
+Select
+
+Supplier
+
+Select Shop(this option is only for the if the purchase team logins and try to add  the materials) 
+
+Technical Specification
+
+Product ImageNo file chosen, dimensions,type of finish(powder,coated,paint finish etc),type of metal (wooden handle,aluminium handle etc)
+
+Add Material    also i need the subscription options demo video options and for each has a dashboards if logins means they redirect to that and for each sign up the different informations to be collected and if the supplier add any irrelevant materials which is not in then immediately the trigger message to the  admin and software team and also there should be one option like technical support for iff supplier needs to add any thing whuch is not in that they can send the message that should be triggered to the admin and the software team and for doors the glass dimension need to be getted it is optional because sometimes the door with glass also available thats it it should look like a apple website you can use any other colour themes which is more attractive apart from the colour i uploaded in the zip file use real time construction calculations   giive as a proper prompt dont remove anything  for each has dashboards except the user and also the user can add their client detail options neede so that while generating quotation or boq the details will be auto filled and the website should be witth proper alingments ui etc as per my requirement add so many shops and materilas by default  and edit and delete options needed

@@ -1,0 +1,440 @@
+import { useState } from "react";
+import { Link } from "wouter";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  WallType, 
+  wallOptions, 
+  subOptionsMap, 
+  plywoodTypes, 
+  glassTypes, 
+  finishOptions, 
+  frameOptions,
+} from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, ChevronRight, ChevronLeft, Calculator } from "lucide-react";
+import { computeCivilWallRequired, CivilWallComputeResult } from "./computeCivilWallRequired";
+
+// Sub-component to handle the complex logic of Step 2
+function Step2Content({ wallType, subOption, setSubOption, plywoodSelection, setPlywoodSelection }: any) {
+    
+    // Logic for Gypsum-Glass and Plywood-Glass
+    if (wallType === "plywood-glass" || wallType === "gypsum-glass") {
+        const isPlywoodGlass = wallType === "plywood-glass";
+        
+        const handleSelect = (key: string, value: string) => {
+            setPlywoodSelection({ ...plywoodSelection, [key]: value });
+        };
+
+        return (
+            <div className="space-y-6">
+                {isPlywoodGlass && (
+                    <div className="space-y-3">
+                         <Label className="text-base">Plywood Type</Label>
+                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {plywoodTypes.map(type => (
+                                <Button 
+                                    key={type}
+                                    variant={plywoodSelection.plywoodType === type ? "default" : "outline"}
+                                    onClick={() => handleSelect("plywoodType", type)}
+                                    className="text-sm"
+                                >
+                                    {type}
+                                </Button>
+                            ))}
+                         </div>
+                    </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-3">
+                        <Label className="text-base">Glass Type</Label>
+                         <div className="flex flex-col gap-2">
+                            {glassTypes.map(type => (
+                                <Button 
+                                    key={type}
+                                    variant={plywoodSelection.glassType === type ? "default" : "outline"}
+                                    onClick={() => handleSelect("glassType", type)}
+                                    className="justify-start"
+                                >
+                                    {type}
+                                </Button>
+                            ))}
+                         </div>
+                    </div>
+                    <div className="space-y-3">
+                        <Label className="text-base">Frame Type</Label>
+                         <div className="flex flex-col gap-2">
+                            {frameOptions.map(type => (
+                                <Button 
+                                    key={type}
+                                    variant={plywoodSelection.frame === type ? "default" : "outline"}
+                                    onClick={() => handleSelect("frame", type)}
+                                    className="justify-start"
+                                >
+                                    {type}
+                                </Button>
+                            ))}
+                         </div>
+                    </div>
+                     <div className="space-y-3">
+                        <Label className="text-base">Finish</Label>
+                         <div className="flex flex-col gap-2">
+                            {finishOptions.map(type => (
+                                <Button 
+                                    key={type}
+                                    variant={plywoodSelection.finish === type ? "default" : "outline"}
+                                    onClick={() => handleSelect("finish", type)}
+                                    className="justify-start"
+                                >
+                                    {type}
+                                </Button>
+                            ))}
+                         </div>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
+    // Logic for Simple Types (Civil, Gypsum)
+    const options = subOptionsMap[wallType as WallType] || [];
+    
+    if (options.length > 0) {
+        return (
+             <div className="space-y-3">
+                <Label className="text-base">Select Specific Type</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {options.map((opt) => (
+                    <Button
+                        key={opt}
+                        variant={subOption === opt ? "default" : "outline"}
+                        onClick={() => setSubOption(opt)}
+                        className="h-14 text-lg"
+                    >
+                        {opt}
+                    </Button>
+                ))}
+                </div>
+            </div>
+        )
+    }
+
+    // Fallback or other types (Plywood, Gypsum-Plywood)
+    return (
+         <div className="space-y-3">
+            <Label className="text-base">Configuration</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {plywoodTypes.map((opt) => (
+                <Button
+                    key={opt}
+                    variant={plywoodSelection.plywoodType === opt ? "default" : "outline"}
+                    onClick={() => setPlywoodSelection({...plywoodSelection, plywoodType: opt})}
+                    className="justify-start"
+                >
+                    {opt}
+                </Button>
+            ))}
+            </div>
+        </div>
+    );
+}
+
+export default function CivilWallEstimator() {
+  const [step, setStep] = useState(1);
+  const [wallType, setWallType] = useState<WallType | null>(null);
+  
+  // State for sub-options
+  const [subOption, setSubOption] = useState<string | null>(null);
+  const [plywoodSelection, setPlywoodSelection] = useState<any>({});
+  
+  // State for dimensions
+  const [dimensions, setDimensions] = useState({
+    length: "",
+    height: "",
+    glassHeight: "",
+    glassLength: ""
+  });
+
+  // Calculated materials
+  const [result, setResult] = useState<CivilWallComputeResult | null>(null);
+
+  const handleNext = () => setStep(prev => prev + 1);
+  const handleBack = () => setStep(prev => prev - 1);
+
+  const calculateEstimate = () => {
+    const len = parseFloat(dimensions.length) || 0;
+    const hgt = parseFloat(dimensions.height) || 0;
+    
+    const computed = computeCivilWallRequired(wallType, len, hgt, subOption, plywoodSelection);
+    setResult(computed);
+    handleNext(); // Move to result step
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-display text-primary">Civil Wall / Partition Estimator</h2>
+          <p className="text-muted-foreground">Calculate material and labor costs for wall partitions.</p>
+        </div>
+
+        {/* Progress Steps */}
+        <div className="flex items-center justify-between mb-8 relative">
+          <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-muted z-0"></div>
+          {[1, 2, 3, 4].map((s) => (
+            <div 
+              key={s} 
+              className={cn(
+                "relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 transition-colors duration-300",
+                step >= s 
+                  ? "bg-primary border-primary text-primary-foreground" 
+                  : "bg-background border-muted text-muted-foreground"
+              )}
+            >
+              {step > s ? <CheckCircle2 className="h-6 w-6" /> : s}
+            </div>
+          ))}
+        </div>
+
+        <Card className="border-border/50 shadow-lg">
+          <CardContent className="p-6">
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div
+                  key="step1"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-6"
+                >
+                  <h3 className="text-xl font-semibold">Step 1: Select Wall Type</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {wallOptions.map((option) => (
+                      <Button
+                        key={option.value}
+                        variant={wallType === option.value ? "default" : "outline"}
+                        className={cn(
+                          "h-24 text-lg justify-start px-6 border-2",
+                          wallType === option.value ? "border-primary bg-primary/10 text-primary hover:bg-primary/20" : "hover:border-primary/50"
+                        )}
+                        onClick={() => {
+                            setWallType(option.value as WallType);
+                            // Auto advance if simplified flow desired, else explicit Next
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex justify-end pt-4">
+                    <Button onClick={handleNext} disabled={!wallType} className="w-32">
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div
+                  key="step2"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-6"
+                >
+                  <h3 className="text-xl font-semibold">Step 2: Specifications for {wallType}</h3>
+                  
+                  {/* Dynamic Options based on wallType */}
+                  <Step2Content 
+                    wallType={wallType} 
+                    subOption={subOption} 
+                    setSubOption={setSubOption}
+                    plywoodSelection={plywoodSelection}
+                    setPlywoodSelection={setPlywoodSelection}
+                  />
+
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32">
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={handleNext} disabled={!subOption && !plywoodSelection.plywoodType} className="w-32">
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 3 && (
+                <motion.div
+                  key="step3"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-6"
+                >
+                  <h3 className="text-xl font-semibold">Step 3: Dimensions</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                        <Label>Wall Length (ft)</Label>
+                        <Input 
+                            type="number" 
+                            placeholder="0.00" 
+                            value={dimensions.length}
+                            onChange={(e) => setDimensions({...dimensions, length: e.target.value})}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Wall Height (ft)</Label>
+                        <Input 
+                            type="number" 
+                            placeholder="0.00" 
+                            value={dimensions.height}
+                            onChange={(e) => setDimensions({...dimensions, height: e.target.value})}
+                        />
+                    </div>
+                    
+                    {(wallType?.includes("glass")) && (
+                        <>
+                            <div className="space-y-2">
+                                <Label>Glass Length (ft)</Label>
+                                <Input 
+                                    type="number" 
+                                    placeholder="0.00" 
+                                    value={dimensions.glassLength}
+                                    onChange={(e) => setDimensions({...dimensions, glassLength: e.target.value})}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Glass Height (ft)</Label>
+                                <Input 
+                                    type="number" 
+                                    placeholder="0.00" 
+                                    value={dimensions.glassHeight}
+                                    onChange={(e) => setDimensions({...dimensions, glassHeight: e.target.value})}
+                                />
+                            </div>
+                        </>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={handleBack} className="w-32">
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={calculateEstimate} className="w-40 bg-green-600 hover:bg-green-700 text-white">
+                      <Calculator className="mr-2 h-4 w-4" /> Calculate
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {step === 4 && result && (
+                <motion.div
+                  key="step4"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="space-y-6"
+                >
+                  <div className="text-center space-y-2">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500">
+                        <Calculator className="h-8 w-8" />
+                    </div>
+                    <h3 className="text-2xl font-bold">Material Requirements</h3>
+                    <p className="text-muted-foreground">Calculated quantities based on your inputs</p>
+                  </div>
+
+                  <div className="bg-muted/30 rounded-lg border border-border overflow-hidden">
+                    <div className="grid grid-cols-12 bg-muted p-3 text-sm font-medium">
+                        <div className="col-span-8">Item Description</div>
+                        <div className="col-span-4 text-right">Qty</div>
+                    </div>
+                    
+                    {result.bricks > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Red Bricks</div>
+                                <div className="text-xs text-muted-foreground">Standard size</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.bricks} <span className="text-xs text-muted-foreground">nos</span></div>
+                        </div>
+                    )}
+                    {result.cementBags > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Cement</div>
+                                <div className="text-xs text-muted-foreground">50kg Bags</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.cementBags} <span className="text-xs text-muted-foreground">bags</span></div>
+                        </div>
+                    )}
+                    {result.sandCft > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">River Sand / M-Sand</div>
+                                <div className="text-xs text-muted-foreground">Cubic Feet</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.sandCft} <span className="text-xs text-muted-foreground">cft</span></div>
+                        </div>
+                    )}
+                    {result.gypsumSheets > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Gypsum Boards</div>
+                                <div className="text-xs text-muted-foreground">6x4 ft Sheets</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.gypsumSheets} <span className="text-xs text-muted-foreground">sheets</span></div>
+                        </div>
+                    )}
+                     {result.plywoodSheets > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Plywood Sheets</div>
+                                <div className="text-xs text-muted-foreground">8x4 ft Sheets</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.plywoodSheets} <span className="text-xs text-muted-foreground">sheets</span></div>
+                        </div>
+                    )}
+                    {result.framingLength > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Framing Channels / Wood</div>
+                                <div className="text-xs text-muted-foreground">Running Feet</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.framingLength} <span className="text-xs text-muted-foreground">rft</span></div>
+                        </div>
+                    )}
+                    {result.screws > 0 && (
+                        <div className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">Drywall Screws</div>
+                                <div className="text-xs text-muted-foreground">Nos</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{result.screws} <span className="text-xs text-muted-foreground">pcs</span></div>
+                        </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)} className="w-32">
+                      Start Over
+                    </Button>
+                    <Link href="/item-master">
+                        <Button className="w-48 bg-primary text-primary-foreground">
+                            Select Materials <ChevronRight className="ml-2 h-4 w-4" />
+                        </Button>
+                    </Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+}

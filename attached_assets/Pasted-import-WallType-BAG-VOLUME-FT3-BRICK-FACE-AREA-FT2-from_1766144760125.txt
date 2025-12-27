@@ -1,0 +1,329 @@
+import { WallType, BAG_VOLUME_FT3, BRICK_FACE_AREA_FT2 } from "./constants";
+
+export const areaFt2 = (L?: number | null, H?: number | null) =>
+  L && H ? L * H : 0;
+
+export const computeRequired = (
+  type: WallType | null,
+  L?: number | null,
+  H?: number | null,
+  thicknessMM: number = 9 * 25.4,
+  subOption?: string | null,
+  brickWastagePercent: number = 0,
+  plywoodType?: string | null,
+  glassHeight?: number | null,
+  glassLength?: number | null, // ✅ Added here
+  plywoodLayering?: string | null,// <-- Added parameter
+  selectedBrick?: string | null   // <-- ADD THIS
+   
+) => {
+  const length = L ?? 0;
+  const height = H ?? 0;
+  const area = areaFt2(length, height);
+  if (!type || area <= 0) return {};
+
+  const thicknessFt = thicknessMM / 304.8;
+
+  // Detect hybrid gypsum+plywood layout via subOption string (e.g. "Gypsum + Plywood")
+  const isHybridGypsumPlywood = typeof subOption === "string" && /gypsum\s*\+?\s*plywood/i.test(subOption);
+
+    const wastageFactor = 1 + brickWastagePercent / 100;
+
+   
+   
+   
+   
+   
+   // -------------------- GYPSUM ONLY --------------------
+if (type === "gypsum") {
+  const isDouble =
+    subOption === "Double Layer" || /double/i.test(subOption || "");
+
+  const areaOneFace = area;
+
+  const BOARD_AREA_SQFT = 24;
+  const faces = 2;
+  const layers = isDouble ? 2 : 1;
+
+  const gypsumArea = areaOneFace * faces * layers * wastageFactor;
+
+  // Boards (no rounding)
+  const boards = gypsumArea / BOARD_AREA_SQFT;
+
+  // Rockwool Bags (70 sqft per bag)
+  const ROCKWOOL_BAG_COVER_SQFT = 70;
+  const rockwoolBags =
+    (areaOneFace * wastageFactor) / ROCKWOOL_BAG_COVER_SQFT;
+
+  // Channels (4.5 ft per piece)
+  const CHANNEL_PIECE_FT = 4.5;
+  const floorChannel = (length / CHANNEL_PIECE_FT) * wastageFactor;
+  const ceilingChannel = (length / CHANNEL_PIECE_FT) * wastageFactor;
+
+  // Studs (no rounding)
+  const studsPerSide = length / 2 + 1;
+  const studs = studsPerSide * 2 * wastageFactor;
+
+  // Joint Tape & Joint Compound (no rounding)
+  const jointTape = gypsumArea / 216;
+
+  const jointCompound = gypsumArea / 432;
+
+  // Screws (no rounding)
+  const screwsGypsum = boards * 40;
+
+  return {
+    area: areaOneFace,
+    boards,
+    rockwoolBags,
+    floorChannel,
+    ceilingChannel,
+    studs,
+    jointTape,
+    jointCompound,
+    screwsGypsum,
+    glazingType: isDouble ? "Double Layer" : "Single Layer",
+  };
+}
+
+
+if (type === "gypsum-glass") {
+  const length = L || 0;
+  const height = H || 0;
+  const gHeight = height - (glassHeight || 0);
+
+  const isDouble = subOption === "Double Glazing";
+
+  // Gypsum boards: double if double glazing
+  const baseBoards = (gHeight * length * 2) / 24; // 2 faces
+  const boards = isDouble ? baseBoards * 2 : baseBoards;
+
+  // Other items (without rounding)
+  const rockwoolBags = (gHeight * length * 2) / 70;
+  const floorChannel = length / 2;
+  const ceilingChannel = length / 2;
+  const studs = length / 5;
+
+  const jointTape = (gHeight * length * 2) / 216;
+  const jointCompound = (gHeight * length * 2) / 432;
+
+  // ---------- FIXED GLASS CHANNELS ----------
+  const channelPieceLengthFt = 10;
+
+  const verticalPieces = (glassHeight || 0) / channelPieceLengthFt;
+  const horizontalPieces = (glassLength || 0) / channelPieceLengthFt;
+
+  const glassChannels = verticalPieces * 2 + horizontalPieces * 2;
+
+  return {
+    boards,
+    rockwoolBags,
+    floorChannel,
+    ceilingChannel,
+    studs,
+    jointTape,
+    jointCompound,
+    glassChannels,
+    gypsumArea: gHeight * length,
+    glazingType: isDouble ? "Double Layer" : "Single Layer",
+  };
+}
+
+
+
+// -------------------- PLYWOOD --------------------
+// -------------------- PLYWOOD --------------------
+// -------------------- PLYWOOD --------------------
+if (type === "plywood") {
+  const L = length ?? 0;
+  const H = height ?? 0;
+  const A = L * H; // One face area (same as gypsum uses)
+
+  const BOARD_AREA_SQFT = 32;
+  const isDouble =
+    (plywoodLayering || "").toLowerCase() === "double";
+
+  const faces = 2; // both sides
+  const layers = isDouble ? 2 : 1;
+
+  // Total plywood cladding area (same pattern as gypsum)
+  const totalPlywoodArea = A * faces * layers * wastageFactor;
+
+  // --- Boards (no rounding)
+  const boardsPlywood = totalPlywoodArea / BOARD_AREA_SQFT;
+
+  // Laminate follows plywood
+  const laminateSheets = boardsPlywood;
+
+  // Screws follow boards
+  const screwsPlywood = boardsPlywood * 40;
+
+  // ---- Channels (same as your logic)
+  const channelLength = 10;
+
+  const tracksPieces = (L * 2) / channelLength;
+
+  const studsPerRun = L / 2 + 1;
+  const studPiecesPerLine = H / channelLength;
+  const totalStudPieces = studsPerRun * studPiecesPerLine;
+
+  const aluminiumChannels =
+    (tracksPieces + totalStudPieces) * wastageFactor;
+
+  // ---- Rockwool in Bags (same as gypsum logic)
+  const ROCKWOOL_BAG_COVER_SQFT = 70;
+  const rockwoolBags =
+    (A * wastageFactor) / ROCKWOOL_BAG_COVER_SQFT; // NOT multiplied by layers
+
+  return {
+    claddingArea: totalPlywoodArea,
+    boardsPlywood,
+    laminateSheets,
+    screwsPlywood,
+    aluminiumChannels,
+    rockwoolBags,
+    plywoodType: plywoodType || "Commercial",
+    glazingType: isDouble ? "Double Layer" : "Single Layer",
+  };
+}
+
+
+  // -------------------- PLYWOOD + GLASS (UPDATED REAL-WORLD) --------------------
+// -------------------- PLYWOOD + GLASS --------------------
+if (type === "plywood-glass") {
+
+  const baseBoards = area / 24;   // NO ROUNDING
+  const isDouble = subOption === "Double Glazing";
+
+  // Only plywood boards change for double
+  const boards = isDouble ? baseBoards * 2 : baseBoards;
+
+  // Laminate always based on single boards — NO ROUNDING
+  const laminateSheets = baseBoards;
+
+  // Other items — NO ROUNDING
+  const aluminiumChannels = length / 2;
+
+  const rockwoolBags = area / 70;
+  const rockwoolKg = rockwoolBags * 20;
+
+  // ---------- FIXED GLASS CHANNELS ----------
+  const channelPieceLengthFt = 10;
+
+  const verticalPieces = (glassHeight || 0) / channelPieceLengthFt;
+  const horizontalPieces = (glassLength || 0) / channelPieceLengthFt;
+
+  const glassChannels = verticalPieces * 2 + horizontalPieces * 2;
+
+  return {
+    boards,
+    laminateSheets,
+    aluminiumChannels,
+    rockwoolBags,
+    rockwoolKg,
+    glassChannels
+  };
+}
+
+
+// -------------------- CIVIL MATERIALS (BRICK + CEMENT + SAND) --------------------
+// -------------------- CIVIL --------------------
+if (type === "civil") {
+
+  // Brick face area
+  const brickFaceArea = BRICK_FACE_AREA_FT2;
+
+  // Base brick count (single layer)
+  const baseBricks = area / brickFaceArea;
+
+  let brickMultiplier = 1; // default = 4.5" wall
+
+  // 9 inch wall = double-layer masonry
+  if ((selectedBrick || subOption) === "9 inch") {
+    brickMultiplier = 2;
+  }
+
+  const bricks = baseBricks * brickMultiplier;
+
+  // Wastage
+  const wastageFactor = 1 + (brickWastagePercent ?? 0) / 100;
+  const bricksWithWastage = bricks * wastageFactor;
+
+  // Thickness resolve
+  let thicknessFtResolved = thicknessFt;
+  if (!thicknessFtResolved) {
+    thicknessFtResolved =
+      (selectedBrick || subOption) === "4.5 inch" ? 0.375 : 0.75;
+  }
+
+  // Cement & sand
+  const cementVolumeFt3 = area * thicknessFtResolved * (1 / 5);
+  const sandVolumeFt3 = area * thicknessFtResolved * (4 / 5);
+
+  return {
+    bricks,
+    bricksWithWastage,
+
+    // No rounding versions
+    roundedBricks: bricksWithWastage,       // return same value
+    cementBags: cementVolumeFt3 / BAG_VOLUME_FT3,
+    roundedCementBags: cementVolumeFt3 / BAG_VOLUME_FT3,
+    sandCubicFt: sandVolumeFt3,
+    roundedSandCubicFt: sandVolumeFt3,
+
+    // Extra data
+    area,
+    wastagePercent: brickWastagePercent,
+    wastageFactor,
+    thicknessFt: thicknessFtResolved,
+    brickFaceArea,
+    brickMultiplier
+  };
+}
+
+
+
+
+
+if (type === "gypsum-plywood") {
+  const area = length * height; // total wall area
+
+  // --- Gypsum Side ---
+  let boardsGypsum = area / 24; // NO ROUNDING
+  const jointTape = 1;
+
+  const JOINT_COMPOUND_COVERAGE = 120; 
+  const jointCompound = area / JOINT_COMPOUND_COVERAGE; // NO ROUNDING
+
+  // --- Rockwool in Bags (NO ROUNDING) ---
+  const ROCKWOOL_SQFT_PER_BAG = 70;
+  const rockwoolBags = area / ROCKWOOL_SQFT_PER_BAG;  // ✔ BAGS (fraction allowed)
+
+  // --- Plywood Side ---
+  let boardsPlywood = area / 32; // NO ROUNDING
+  const aluminiumChannels = length * 1.2; // NO ROUNDING
+  const laminate = boardsPlywood;
+
+  // --- DOUBLE LAYER RULE ---
+  if (/double/i.test(subOption || "")) {
+    boardsGypsum *= 2;
+    boardsPlywood *= 2;
+  }
+
+  return {
+    boardsGypsum,
+    jointTape,
+    jointCompound,
+    boardsPlywood,
+    aluminiumChannels,
+    laminateSheets: laminate,
+    rockwoolBags,  // ✔ Already in bags, no rounding
+  };
+}
+
+
+  
+  return {};
+};
+
+export default computeRequired;

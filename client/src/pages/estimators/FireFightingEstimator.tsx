@@ -1,0 +1,88 @@
+import { useState } from "react";
+import { Link } from "wouter";
+import { Layout } from "@/components/layout/Layout";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { motion, AnimatePresence } from "framer-motion";
+import { Calculator } from "lucide-react";
+
+export default function FireFightingEstimator() {
+  const [step, setStep] = useState(1);
+  const [area, setArea] = useState("");
+  const [materials, setMaterials] = useState<any[]>([]);
+
+  const calculate = () => {
+    const a = parseFloat(area) || 0;
+    
+    let mats = [];
+    mats.push({ item: "Sprinkler Points", description: "1 per 100 sq.ft", quantity: Math.ceil(a / 100), unit: "nos" });
+    mats.push({ item: "MS Pipe 25mm", description: "Distribution line", quantity: Math.ceil(a / 100) * 10, unit: "rft" });
+    mats.push({ item: "Fire Extinguishers", description: "1 per 1000 sq.ft", quantity: Math.ceil(a / 1000), unit: "nos" });
+    mats.push({ item: "Smoke Detectors", description: "1 per 400 sq.ft", quantity: Math.ceil(a / 400), unit: "nos" });
+
+    setMaterials(mats);
+    setStep(2);
+  };
+
+  return (
+    <Layout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight font-heading text-primary">Fire-Fighting Estimator</h2>
+          <p className="text-muted-foreground">Calculate fire safety system requirements.</p>
+        </div>
+
+        <Card className="border-border/50 shadow-lg">
+          <CardContent className="p-6">
+            <AnimatePresence mode="wait">
+              {step === 1 && (
+                <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                  <h3 className="text-xl font-semibold">Step 1: Floor Area</h3>
+                  <div className="grid grid-cols-1 gap-6">
+                    <div className="space-y-2">
+                        <Label>Total Floor Area (sq.ft)</Label>
+                        <Input type="number" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. 2000" />
+                    </div>
+                  </div>
+                   <div className="flex justify-end pt-4"><Button onClick={calculate} className="w-40 bg-green-600 hover:bg-green-700 text-white"><Calculator className="mr-2 h-4 w-4" /> Calculate</Button></div>
+                </motion.div>
+              )}
+
+              {step === 2 && (
+                <motion.div key="s2" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                   <div className="text-center space-y-2">
+                    <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto text-blue-500"><Calculator className="h-8 w-8" /></div>
+                    <h3 className="text-2xl font-bold">Material Requirements</h3>
+                  </div>
+                  <div className="bg-muted/30 rounded-lg border border-border overflow-hidden">
+                    <div className="grid grid-cols-12 bg-muted p-3 text-sm font-medium">
+                        <div className="col-span-8">Item Description</div>
+                        <div className="col-span-4 text-right">Qty</div>
+                    </div>
+                    {materials.map((mat, idx) => (
+                         <div key={idx} className="grid grid-cols-12 p-4 border-b border-border/50 text-sm items-center">
+                            <div className="col-span-8">
+                                <div className="font-medium text-foreground">{mat.item}</div>
+                                <div className="text-xs text-muted-foreground">{mat.description}</div>
+                            </div>
+                            <div className="col-span-4 text-right font-mono text-lg">{mat.quantity.toFixed(1)} <span className="text-xs text-muted-foreground">{mat.unit}</span></div>
+                        </div>
+                    ))}
+                  </div>
+                   <div className="flex justify-between pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)} className="w-32">Start Over</Button>
+                    <Link href="/item-master"><Button className="w-48 bg-primary text-primary-foreground">Select Materials <ChevronRight className="ml-2 h-4 w-4" /></Button></Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
+  );
+}
+
+import { ChevronRight } from "lucide-react";

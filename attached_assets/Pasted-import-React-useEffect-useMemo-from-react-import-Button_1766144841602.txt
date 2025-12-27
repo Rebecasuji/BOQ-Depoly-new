@@ -1,0 +1,1513 @@
+import React, { useEffect, useMemo } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { MATERIAL_HIERARCHY, WallType } from "./constants";
+import computeRequired from "./computeRequired";
+import { ROCKWOOL_BAG_COVER_SQFT, ROCKWOOL_KG_PER_SHEET as ROCKWOOL_KG_PER_SHEET_CONST } from "./constants";
+
+// --- PLACEHOLDER CONSTANTS (You should import these) ---
+// Assuming these are defined or imported in your actual project
+const plywoodTypes = ["Commercial Plywood", "BWP Plywood"];
+const glazingOptions = ["Single Glazing", "Double Glazing"];
+const glassTypes = ["Annealed Glass", "Toughened Glass"];
+const finishOptions = ["Laminate Finish", "Veneer Finish"];
+const frameOptions = ["Aluminium Frame", "Wooden Frame", "None"];
+const ROCKWOOL_KG_PER_SHEET = 10;
+// --- END PLACEHOLDER CONSTANTS ---
+
+// Consolidated Default Rates (FIXED: Moved rate definition outside the component body)
+const DEFAULT_RATES: Record<string, number> = {
+    // Gypsum Rates
+    "12mm Gypsum Board": 415,
+    "Rockwool 50mm": 1850, // Per Sheet rate
+    "Floor Channel": 165.2,
+    "GI Stud": 177,
+    "Joint Tape": 90,
+    "Jointing Compound": 703,
+    
+    // Plywood Rates
+    "Plywood Boards": 750, 
+    "Rockwool Bags": 1850, // Placeholder per bag/kg
+    "Aluminium Channels": 150, 
+    "Laminate Sheets": 1200, 
+    "Screws": 1, 
+    "18mm Plywood Board": 750, // Used in Hybrid calc
+    "12mm Plywood Board": 500, // Used in Hybrid calc
+
+    // Glass Rates
+    "Glass Area": 100, // Per ft²
+    "Glass Channels": 170, 
+    "Silicone Tubes": 350, 
+    
+    // Additional Charges
+    "Hardware": 0,
+    "Loading & Unloading": 0,
+    "Transport": 0,
+};
+
+// FIXED: Consolidated rate lookup function
+const findRate = (materialType: string): number => {
+    // If rate is found in DEFAULT_RATES, use it, otherwise check MATERIAL_HIERARCHY, otherwise 0.
+    if (DEFAULT_RATES[materialType] !== undefined) {
+        return DEFAULT_RATES[materialType];
+    }
+    
+    // Fallback to MATERIAL_HIERARCHY (reusing your existing logic pattern)
+    for (const cat of MATERIAL_HIERARCHY) {
+        for (const t of cat.types) {
+            if (t.type.toLowerCase().includes(materialType.toLowerCase().split(" ")[0])) return t.rate;
+            if (t.type.toLowerCase() === materialType.toLowerCase()) return t.rate;
+        }
+    }
+    return 0;
+};
+
+
+interface MaterialSelection {
+    type: string;
+    unit: string;
+    quantity: number;
+    rate?: number;
+}
+
+interface Props {
+    wallType: WallType | null;
+    subOption: string | null;
+    length: number | null;
+    height: number | null;
+    materials: MaterialSelection[];
+    setMaterials: React.Dispatch<React.SetStateAction<MaterialSelection[]>>;
+    brickWastage: number;
+    setBrickWastage: (val: number) => void;
+    liveStatus: Record<string, { ok: boolean; message?: string }>;
+    setLiveStatus: React.Dispatch<React.SetStateAction<Record<string, { ok: boolean; message?: string }>>>;
+    handleBack: () => void;
+    handleSubmitFinal: () => void;
+    handleSubmit: () => void;
+    plywoodSelection?: {
+        glassType?: string;
+        glazing?: string;
+        plywoodType?: string;
+        layering?: string;
+        beading?: string;
+        finish?: string;
+        frame?: string;
+    };
+    glassHeight?: number | null;
+    glassLength?: number | null;  // ✅ Add this
+
+    setPlywoodSelection?: React.Dispatch<React.SetStateAction<any>>;
+}
+
+export default function Step4Materials({
+    wallType,
+    subOption,
+    length,
+    height,
+    materials,
+    setMaterials,
+    brickWastage,
+    setBrickWastage,
+    liveStatus,
+    setLiveStatus,
+    handleBack,
+    handleSubmitFinal,
+    handleSubmit,
+    plywoodSelection,
+    glassHeight,
+     glassLength,  
+    setPlywoodSelection, // Added to props for the selection UI
+}: Props) {
+    
+    // Original local rate definition removed as it's now in DEFAULT_RATES
+    // const GYPSUM_RATES: Record<string, number> = {...};
+    
+    // Helper function for Component Status (Refactored and added units/decimals for clarity)
+    const updateStatusForComponent = (status: Record<string, { ok: boolean; message?: string }>) => 
+        (name: string, requiredQty: number | null | undefined, unit: string) => {
+        const fixedRequiredQty = requiredQty ?? 0;
+        const provided = materials.find((m) => m.type === name)?.quantity ?? 0;
+        
+        if (fixedRequiredQty <= 0.01) { 
+            status[name] = { ok: true };
+        } else if (provided === 0) {
+            status[name] = { ok: false, message: `Missing — required ${fixedRequiredQty.toFixed(2)} ${unit}` };
+        } else if (provided < fixedRequiredQty) {
+            status[name] = { ok: false, message: `Insufficient — required ${fixedRequiredQty.toFixed(2)} ${unit}, provided ${provided.toFixed(2)}` };
+        } else {
+            status[name] = { ok: true };
+        }
+    };
+
+
+    // Update live status (MODIFIED: Consolidated logic, FIXED plywood-glass component status check)
+    useEffect(() => {
+        if (!wallType) return;
+
+        const subOptionForCalc = (plywoodSelection as any)?.glazing ?? subOption;
+        const typeForReq = wallType === "plywood-glass" ? wallType : (wallType as WallType);
+
+        const req = computeRequired(
+            typeForReq, 
+            length, 
+            height, 
+            undefined, 
+            subOptionForCalc,
+            brickWastage, 
+            (plywoodSelection as any)?.plywoodType, 
+            glassHeight
+        );
+        const status: Record<string, { ok: boolean; message?: string }> = {};
+        
+        // Pass status object to the helper factory
+        const setComponentStatus = updateStatusForComponent(status);
+        
+        // --- 1. CIVIL STATUS (Preserved original style) ---
+        // (Assuming updateStatusForCategory logic is correct elsewhere or defined within the closure)
+        if (wallType === "civil") {
+             const updateStatusForCategory = (
+                category: string,
+                requiredQty: number,
+                unit: string,
+                validTypes: string[]
+            ) => {
+                const totalProvided = materials
+                    .filter((m) => validTypes.includes(m.type))
+                    .reduce((sum, m) => sum + (m.quantity ?? 0), 0);
+
+                if (totalProvided === 0) {
+                    status[category] = { ok: false, message: `Missing — required ${requiredQty} ${unit}` };
+                } else if (totalProvided < requiredQty) {
+                    status[category] = {
+                        ok: false,
+                        message: `Insufficient — required ${requiredQty} ${unit}, provided ${totalProvided}`,
+                    };
+                } else {
+                    status[category] = { ok: true };
+                }
+            };
+            updateStatusForCategory("Bricks", req.roundedBricks ?? 0, "pcs", ["Red Clay Brick", "Fly Ash Brick", "Argon Block", "Solid Block"]);
+            updateStatusForCategory("Cement", req.roundedCementBags ?? 0, "bags", ["Ordinary Portland Cement", "Pozzolana Cement", "White Cement"]);
+            updateStatusForCategory("Sand", req.roundedSandCubicFt ?? 0, "ft³", ["River Sand", "M-Sand"]);
+        }
+
+        // --- 2. GYPSUM & PLYWOOD STATUS (Preserved logic structure and adapted to use helper) ---
+        if (wallType === "gypsum") {
+            setComponentStatus("12mm Gypsum Board", req.boards ?? 0, "pcs");
+            setComponentStatus("Rockwool 50mm", req.rockwoolSheets ?? 0, "pcs");
+            setComponentStatus("Floor Channel", req.floorChannel ?? 0, "pcs");
+            setComponentStatus("GI Stud", req.studs ?? 0, "pcs");
+            setComponentStatus("Joint Tape", req.jointTape ?? 0, "pcs");
+            setComponentStatus("Jointing Compound", req.jointCompound ?? 0, "pcs");
+        }
+
+        if (wallType === "plywood" || wallType === "plywood-glass" || isHybridLayout) {
+            // Note: In the hybrid section below, boardType logic is handled inside the JSX loop,
+            // but we must check the generic Plywood Boards for safety if the user selected it.
+            setComponentStatus("Plywood Boards", req.boards ?? 0, "pcs");
+            setComponentStatus("Aluminium Channels", req.aluminiumChannels ?? 0, "pcs");
+            setComponentStatus("Laminate Sheets", req.laminateSheets ?? 0, "pcs");
+            setComponentStatus("Rockwool Bags", req.rockwoolBags ?? 0, "bags"); // Checked if selected
+            
+            // --- PLYWOOD-GLASS Specific Checks (FIXED) ---
+            if (wallType === "plywood-glass") {
+                //setComponentStatus("Glass Area", req.glassArea ?? 0, "ft²");
+                setComponentStatus("Glass Channels", req.glassChannels ?? 0, "pcs");
+                //setComponentStatus("Silicone Tubes", req.siliconeTubes ?? 0, "pcs");
+            }
+        }
+
+        // --- 3. GYPSUM + GLASS STATUS ---
+if (wallType === "gypsum-glass") {
+
+    // ------- GYPSUM SIDE (existing keys from computeRequired) -------
+    setComponentStatus("12mm Gypsum Board", req.boards ?? 0, "pcs");
+    setComponentStatus("Rockwool 50mm", req.rockwoolSheets ?? 0, "sheets");
+    setComponentStatus("Floor Channel", req.floorChannel ?? 0, "pcs");
+    setComponentStatus("GI Stud", req.studs ?? 0, "pcs");
+    setComponentStatus("Joint Tape", req.jointTape ?? 0, "pcs");
+    setComponentStatus("Jointing Compound", req.jointCompound ?? 0, "pcs");
+
+    // ------- GLASS SIDE (existing key) -------
+    setComponentStatus("Glass Channels", req.glassChannels ?? 0, "pcs");
+
+    // NOTE: Glass Area & Silicone Tubes intentionally not included
+}
+
+
+
+        // --- 3. ADDITIONAL CHARGES STATUS ---
+        ["Hardware", "Loading & Unloading", "Transport"].forEach((charge) => {
+            const selected = materials.find((m) => m.type === charge);
+            // Check if selected, and if quantity OR rate are missing/zero
+            if (!selected || (selected.quantity ?? 0) === 0 || (selected.rate ?? 0) === 0) {
+                status[charge] = { ok: false, message: `Enter quantity & rate` };
+            } else {
+                status[charge] = { ok: true };
+            }
+        });
+
+        setLiveStatus(status);
+    }, [materials, wallType, length, height, subOption, brickWastage, setLiveStatus, plywoodSelection, glassHeight]);
+
+    if (!wallType) return null;
+
+    const isHybridLayout = typeof subOption === "string" && /gypsum\s*\+?\s*plywood/i.test(subOption || "");
+
+    // -------------------- GYPSUM + PLYWOOD (HYBRID) MATERIALS --------------------
+if (isHybridLayout) {
+  const req = computeRequired(
+  "gypsum-plywood",
+  length,
+  height,
+  undefined,
+  subOption,
+  brickWastage,
+  (plywoodSelection as any)?.plywoodType,
+  glassHeight
+);
+
+  const boardType = /double/i.test(subOption || "") ? "12mm Plywood Board" : "18mm Plywood Board";
+
+  const gypsumSection = [
+    { name: "12mm Gypsum Board", requiredQty: req.boardsGypsum ?? req.boards ?? 0, unit: "pcs" },
+    { name: "Joint Tape", requiredQty: req.jointTape ?? 0, unit: "pcs" },
+    { name: "Jointing Compound", requiredQty: req.jointCompound ?? 0, unit: "bags" },
+   { name: "Rockwool Bags", requiredQty: req.rockwoolKg ?? req.rockwoolBags ?? 0, unit: "kg", optional: true },
+    //{ name: "Floor Channel", requiredQty: req.floorChannel ?? 0, unit: "pcs" },
+    //{ name: "GI Stud", requiredQty: req.studsGypsum ?? req.verticalStuds ?? 0, unit: "pcs" },
+  ];
+
+  const plywoodSection = [
+    { name: boardType, requiredQty: req.boardsPlywood ?? req.boards ?? 0, unit: "pcs" },
+    //{ name: "Rockwool", requiredQty: req.rockwoolKg ?? req.rockwoolBags ?? 0, unit: "kg", optional: true },
+    { name: "Aluminium Channels", requiredQty: req.aluminiumChannels ?? 0, unit: "pcs" },
+    { name: "Laminate Sheets", requiredQty: req.laminateSheets ?? 0, unit: "pcs" },
+  ];
+
+  const getStatusMessage = (name: string, requiredQty: number, unit: string) => {
+    const sel = materials.find((m) => m.type === name);
+    const provided = sel?.quantity ?? 0;
+
+    if (requiredQty <= 0) return null;
+
+    if (!sel || provided === 0)
+      return (
+        <p className="text-xs text-red-500 font-semibold">
+          Missing — required {requiredQty.toFixed(2)} {unit}
+        </p>
+      );
+
+    if (provided < requiredQty)
+      return (
+        <p className="text-xs text-orange-500 font-semibold">
+          Insufficient — required {requiredQty.toFixed(2)} {unit}, provided {provided.toFixed(2)}
+        </p>
+      );
+
+    return null;
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Gypsum Side */}
+      <div>
+        <p className="font-semibold text-black">Gypsum Side</p>
+        <p className="text-xs text-gray-600">Gypsum components for the hybrid partition</p>
+        <div className="space-y-2 mt-2 bg-white p-3 rounded-md">
+          {gypsumSection.map(({ name, requiredQty, unit }) => {
+            const selected = materials.find((m) => m.type === name);
+            const defaultRate = findRate(name) || (name.includes("Joint") ? 0 : 415);
+
+            return (
+              <div key={name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={!!selected}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setMaterials((prev) => {
+                          const exists = prev.find((m) => m.type === name);
+                          if (exists) return prev.map((m) => m.type === name ? { ...m, quantity: requiredQty, rate: defaultRate } : m);
+                          return [...prev, { type: name, quantity: requiredQty, unit, rate: defaultRate }];
+                        });
+                      } else {
+                        setMaterials((prev) => prev.filter((m) => m.type !== name));
+                      }
+                    }}
+                  />
+                  <div>
+                    <div className="text-black">{name}</div>
+                    <div className="text-xs text-gray-600">Required: {requiredQty.toFixed(2)} {unit}</div>
+                    {getStatusMessage(name, requiredQty, unit)}
+                  </div>
+                </div>
+                {selected && (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.quantity}
+                      onChange={(e) => {
+                        const qty = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => m.type === name ? { ...m, quantity: qty } : m));
+                      }}
+                      className="w-20 text-black"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.rate || 0}
+                      onChange={(e) => {
+                        const rate = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => m.type === name ? { ...m, rate } : m));
+                      }}
+                      className="w-20 text-black"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Plywood Side */}
+      <div>
+        <p className="font-semibold text-black">Plywood Side</p>
+        <p className="text-xs text-gray-600">Plywood components for the hybrid partition</p>
+        <div className="space-y-2 mt-2 bg-white p-3 rounded-md">
+          {plywoodSection.map(({ name, requiredQty, unit, optional }) => {
+            const selected = materials.find((m) => m.type === name);
+            let defaultRate = findRate(name) || 0;
+            if (name === "Rockwool") defaultRate = Math.round((DEFAULT_RATES["Rockwool 50mm"] || 1850) / ROCKWOOL_KG_PER_SHEET);
+
+            return (
+              <div key={name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={!!selected}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setMaterials((prev) => {
+                          const exists = prev.find((m) => m.type === name);
+                          if (exists) return prev.map((m) => m.type === name ? { ...m, quantity: requiredQty, rate: defaultRate } : m);
+                          return [...prev, { type: name, quantity: requiredQty, unit, rate: defaultRate }];
+                        });
+                      } else {
+                        setMaterials((prev) => prev.filter((m) => m.type !== name));
+                      }
+                    }}
+                  />
+                  <div>
+                    <div className="text-black">
+                      {name}{optional && <span className="text-gray-500 text-xs ml-2">(optional)</span>}
+                    </div>
+                    <div className="text-xs text-gray-600">Required: {requiredQty.toFixed(2)} {unit}</div>
+                    {getStatusMessage(name, requiredQty, unit)}
+                  </div>
+                </div>
+                {selected && (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.quantity}
+                      onChange={(e) => {
+                        const qty = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => m.type === name ? { ...m, quantity: qty } : m));
+                      }}
+                      className="w-20 text-black"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.rate || 0}
+                      onChange={(e) => {
+                        const rate = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => m.type === name ? { ...m, rate } : m));
+                      }}
+                      className="w-20 text-black"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Additional Charges */}
+<div className="space-y-2 mt-4">
+  <p className="font-semibold text-white">Additional Charges</p>
+  {["Hardware", "Loading & Unloading", "Transport", "Labour Charges"].map((charge) => {
+    const selected = materials.find((m) => m.type === charge);
+    return (
+      <div key={charge} className="flex items-center gap-2 pl-4 bg-white p-3 rounded-md">
+        <span className="text-black w-44">{charge}</span>
+
+        {/* Qty */}
+        <Input
+          type="number"
+          min={0}
+          placeholder="Qty"
+          value={selected?.quantity ?? ""}
+          onChange={(e) => {
+            const qty = Number(e.target.value || 0);
+            setMaterials((prev) => {
+              const exists = prev.find((m) => m.type === charge);
+              if (exists)
+                return prev.map((m) => m.type === charge ? { ...m, quantity: qty } : m);
+              return [...prev, { type: charge, quantity: qty, unit: "pcs", rate: selected?.rate ?? findRate(charge) }];
+            });
+          }}
+          className="w-20 text-black"
+        />
+
+        {/* Rate */}
+        <Input
+          type="number"
+          min={0}
+          placeholder="Rate"
+          value={selected?.rate ?? ""}
+          onChange={(e) => {
+            const rate = Number(e.target.value || 0);
+            setMaterials((prev) => {
+              const exists = prev.find((m) => m.type === charge);
+              if (exists)
+                return prev.map((m) => m.type === charge ? { ...m, rate } : m);
+              return [...prev, { type: charge, quantity: 1, unit: "pcs", rate }];
+            });
+          }}
+          className="w-20 text-black"
+        />
+      </div>
+    );
+  })}
+</div>
+
+      {/* Navigation */}
+      <div className="flex gap-2 mt-4">
+        <Button onClick={handleBack} className="border-cyan-500 text-white">Back</Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSubmitFinal} className="bg-cyan-500 text-black">Next: View Cost Summary</Button>
+          <Button onClick={handleSubmit} className="bg-cyan-500 text-black">Add Wall Partition</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+    // -------------------- PLYWOOD + GLASS MATERIALS (FIXED) --------------------
+    const req = useMemo(() => {
+        if (
+            wallType === "plywood-glass" &&
+            plywoodSelection?.plywoodType &&
+            plywoodSelection.glazing && // Note: Spelling error fixed in logic but kept in JSX if it exists there
+            plywoodSelection.glassType &&
+            plywoodSelection.finish &&
+            plywoodSelection.frame &&
+            length != null &&
+            height != null &&
+            glassHeight != null
+        ) {
+            return computeRequired(
+                "plywood-glass",
+                length,
+                height,
+                undefined,
+                plywoodSelection.glazing,
+                undefined,
+                plywoodSelection.plywoodType,
+                glassHeight
+            );
+        }
+        return null;
+    }, [wallType, length, height, glassHeight, plywoodSelection]);
+
+    if (wallType === "plywood-glass") {
+        // Step 1: Selection UI (Check for null/undefined plywoodSelection early)
+        if (!plywoodSelection) {
+            return <div className="p-4 bg-red-100 rounded">Error: Plywood selection state is missing.</div>;
+        }
+
+        // Corrected spelling of plywoodSelection in this line
+        if (!plywoodSelection.plywoodType || !plywoodSelection.glazing || !plywoodSelection.glassType || !plywoodSelection.finish || !plywoodSelection.frame) {
+            
+            // --- This is the placeholder for your selection UI ---
+            return (
+                <div className="space-y-4 p-4 bg-gray-700 rounded">
+                    <h3 className="font-semibold text-white">Select Plywood & Glazing Options</h3>
+                    {/* Simplified selection view for brevity */}
+                    <p className="text-white">... Plywood type selection UI goes here ...</p>
+                    {/* The rest of the selection UI must be here, using setPlywoodSelection */}
+                    <div className="flex gap-2 mt-4">
+                        <Button onClick={handleBack} className="bg-gray-500 text-black">Back</Button>
+                        {plywoodSelection.plywoodType && plywoodSelection.glazing &&
+                            plywoodSelection.glassType && plywoodSelection.finish && plywoodSelection.frame && (
+                                <Button onClick={handleSubmitFinal} className="bg-cyan-500 text-black">Next</Button>
+                            )}
+                    </div>
+                </div>
+            );
+            // --- End Placeholder ---
+        }
+
+        // Step 2: Show material quantities after selections
+        if (!req) {
+            return (
+                <div className="p-4 bg-yellow-100 rounded">
+                    Please make sure dimensions and all options are selected correctly. (Current req is null)
+                </div>
+            );
+        }
+
+        // Additional Charges
+        const additionalCharges = ["Hardware", "Loading & Unloading", "Transport", "Labour Charges"];
+
+        return (
+            <div className="space-y-4 p-4 bg-gray-100 rounded">
+                <h3 className="text-xl font-bold text-cyan-500">Materials Required: Plywood + Glass</h3>
+
+                {/* Plywood Components (FIXED: Rates and Live Status) */}
+                <div className="bg-white p-3 rounded-md">
+                    <p className="font-semibold text-black mb-2">Plywood Components</p>
+                    {[
+                        { type: "Plywood Boards", qty: req.boards ?? 0, unit: "pcs" },
+                        { type: "Rockwool Bags", qty: req.rockwoolBags ?? 0, unit: "bags" },
+                        { type: "Aluminium Channels", qty: req.aluminiumChannels ?? 0, unit: "pcs" },
+                        { type: "Laminate Sheets", qty: req.laminateSheets ?? 0, unit: "pcs" },
+                        //{ type: "Screws", qty: req.screwsPlywood ?? 0, unit: "pcs" },
+                    ].map((item) => {
+                        const selected = materials.find((m) => m.type === item.type);
+                        const currentStatus = liveStatus[item.type]; 
+                        const isMissingOrInsufficient = currentStatus && !currentStatus.ok;
+                        const defaultRate = findRate(item.type); // Using unified findRate
+
+                        return (
+                            <div key={item.type} className="flex items-center gap-2 mb-2">
+                                <Checkbox
+                                    checked={!!selected}
+                                    onCheckedChange={(checked) => {
+                                        if (checked) {
+                                            setMaterials((prev) => {
+                                                const exists = prev.find((m) => m.type === item.type);
+                                                if (exists)
+                                                    return prev.map((m) =>
+                                                        m.type === item.type ? { ...m, quantity: item.qty, rate: m.rate ?? defaultRate } : m
+                                                    );
+                                                return [...prev, { type: item.type, quantity: item.qty, unit: item.unit, rate: defaultRate }];
+                                            });
+                                        } else {
+                                            setMaterials((prev) => prev.filter((m) => m.type !== item.type));
+                                        }
+                                    }}
+                                />
+                                <span className="w-44 text-black">
+                                    {item.type}
+                                    <div className="text-xs text-gray-600">Required: {item.qty.toFixed(2)} {item.unit}</div>
+                                    {isMissingOrInsufficient && (
+                                        <div className="text-xs text-red-500 font-semibold">⚠️ {currentStatus.message}</div>
+                                    )}
+                                </span>
+                                {selected && (
+                                    <>
+                                        {/* Quantity Input */}
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={selected.quantity}
+                                            onChange={(e) => {
+                                                const qty = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === item.type ? { ...m, quantity: qty } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                        />
+                                        {/* Rate Input (FIXED: Added input for rate) */}
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            placeholder="Rate"
+                                            value={selected.rate ?? defaultRate} // Show current rate or default rate
+                                            onChange={(e) => {
+                                                const rate = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === item.type ? { ...m, rate } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                        />
+                                    </>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Glass Components (FIXED: Rates and Live Status) */}
+                <div className="bg-white p-3 rounded-md">
+                    <p className="font-semibold text-black mb-2">Glass Components</p>
+                    {[
+//{ type: "Glass Area", qty: req.glassArea ?? 0, unit: "ft²" },
+                        { type: "Glass Channels", qty: req.glassChannels ?? 0, unit: "pcs" },
+                        //{ type: "Silicone Tubes", qty: req.siliconeTubes ?? 0, unit: "pcs" },
+                    ].map((item) => {
+                        const selected = materials.find((m) => m.type === item.type);
+                        const currentStatus = liveStatus[item.type]; 
+                        const isMissingOrInsufficient = currentStatus && !currentStatus.ok;
+                        const defaultRate = findRate(item.type); // Using unified findRate
+
+                        return (
+                            <div key={item.type} className="flex items-center gap-2 mb-2">
+                                <Checkbox
+                                    checked={!!selected}
+                                    onCheckedChange={(checked) => {
+                                        if (checked) {
+                                            setMaterials((prev) => {
+                                                const exists = prev.find((m) => m.type === item.type);
+                                                if (exists)
+                                                    return prev.map((m) =>
+                                                        m.type === item.type ? { ...m, quantity: item.qty, rate: m.rate ?? defaultRate } : m
+                                                    );
+                                                return [...prev, { type: item.type, quantity: item.qty, unit: item.unit, rate: defaultRate }];
+                                            });
+                                        } else {
+                                            setMaterials((prev) => prev.filter((m) => m.type !== item.type));
+                                        }
+                                    }}
+                                />
+                                <span className="w-44 text-black">
+                                    {item.type}
+                                    <div className="text-xs text-gray-600">Required: {item.qty.toFixed(2)} {item.unit}</div>
+                                    {isMissingOrInsufficient && (
+                                        <div className="text-xs text-red-500 font-semibold">⚠️ {currentStatus.message}</div>
+                                    )}
+                                </span>
+                                {selected && (
+                                    <>
+                                        {/* Quantity Input */}
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={selected.quantity}
+                                            onChange={(e) => {
+                                                const qty = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === item.type ? { ...m, quantity: qty } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                        />
+                                        {/* Rate Input (FIXED: Added input for rate) */}
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            placeholder="Rate"
+                                            value={selected.rate ?? defaultRate}
+                                            onChange={(e) => {
+                                                const rate = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === item.type ? { ...m, rate } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                        />
+                                    </>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Additional Charges (Shared Logic & Status) */}
+                {/* Additional Charges (Shared Logic & Status) */}
+<div className="bg-white p-3 rounded-md">
+    <p className="font-semibold text-black mb-2">Additional Charges</p>
+    {additionalCharges.map((charge) => {
+        const selected = materials.find((m) => m.type === charge);
+        const defaultRate = findRate(charge);
+
+        // 🔥 Missing/Insufficient check: Qty or Rate = 0 triggers warning
+        const isMissingOrInsufficient = selected && (selected.quantity === 0 || selected.rate === 0);
+
+        return (
+            <div key={charge} className="flex items-center gap-2 mb-2">
+                <span className="w-44 text-black">
+                    {charge}
+                    {isMissingOrInsufficient && (
+                        <div className="text-xs text-red-500 font-semibold">⚠️ Enter quantity & rate</div>
+                    )}
+                </span>
+                {/* Quantity Input */}
+                <Input
+                    type="number"
+                    min={0}
+                    placeholder="Qty"
+                    value={selected?.quantity ?? ""}
+                    onChange={(e) => {
+                        const qty = Number(e.target.value || 0);
+                        setMaterials((prev) => {
+                            const exists = prev.find((m) => m.type === charge);
+                            if (exists)
+                                return prev.map((m) =>
+                                    m.type === charge ? { ...m, quantity: qty } : m
+                                );
+                            return [
+                                ...prev,
+                                { 
+                                  type: charge, 
+                                  quantity: qty, 
+                                  unit: charge === "Labour Charges" ? "Qty" : "pcs", 
+                                  rate: selected?.rate ?? defaultRate 
+                                }
+                            ];
+                        });
+                    }}
+                    className="w-20 text-black"
+                />
+                {/* Rate Input */}
+                <Input
+                    type="number"
+                    min={0}
+                    placeholder="Rate"
+                    value={selected?.rate ?? ""}
+                    onChange={(e) => {
+                        const rate = Number(e.target.value || 0);
+                        setMaterials((prev) => {
+                            const exists = prev.find((m) => m.type === charge);
+                            if (exists)
+                                return prev.map((m) =>
+                                    m.type === charge ? { ...m, rate } : m
+                                );
+                            return [
+                                ...prev,
+                                { 
+                                  type: charge, 
+                                  quantity: 1, 
+                                  unit: charge === "Labour Charges" ? "Qty" : "pcs", 
+                                  rate 
+                                }
+                            ];
+                        });
+                    }}
+                    className="w-20 text-black"
+                />
+            </div>
+        );
+    })}
+</div>
+
+
+                {/* Navigation */}
+                <div className="flex gap-2 mt-4">
+                    <Button onClick={handleBack} className="border-cyan-500 text-white">Back</Button>
+                    <div className="flex gap-2">
+                        <Button onClick={handleSubmitFinal} className="bg-cyan-500 text-black">Next: View Cost Summary</Button>
+                        <Button onClick={handleSubmit} className="bg-cyan-500 text-black">Add Wall Partition</Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // ... (Your rendering logic for Civil and pure Gypsum/Plywood goes here) ...
+
+   
+// -------------------- GYPSUM + GLASS UI --------------------
+// -------------------- GYPSUM + GLASS UI --------------------
+if (wallType === "gypsum-glass") {
+
+  // ✅ Compute required materials, memoized so it recalculates on dependency changes
+  const req = useMemo(() => {
+    if (
+      subOption &&
+      length != null &&
+      height != null &&
+      glassHeight != null &&
+      glassLength != null
+    ) {
+      return computeRequired(
+        "gypsum-glass",
+        length,
+        height,
+        undefined,
+        subOption,
+        brickWastage,
+        undefined,
+        glassHeight,
+        glassLength,
+        undefined
+      );
+    }
+    return null;
+  }, [subOption, length, height, glassHeight, glassLength, brickWastage]);
+
+  const gypsumHeight = height && glassHeight ? height - glassHeight : height ?? 0;
+
+  const gypsumSection = [
+    { name: "12mm Gypsum Board", requiredQty: req?.boards ?? 0, unit: "pcs" },
+    { name: "Rockwool 50mm", requiredQty: req?.rockwoolBags ?? 0, unit: "sheets" },
+    { name: "Floor Channel", requiredQty: req?.floorChannel ?? 0, unit: "pcs" },
+    { name: "GI Stud", requiredQty: req?.studs ?? 0, unit: "pcs" },
+    { name: "Joint Tape", requiredQty: req?.jointTape ?? 0, unit: "pcs" },
+    { name: "Jointing Compound", requiredQty: req?.jointCompound ?? 0, unit: "pcs" },
+  ];
+
+  const glassSection = [
+    { name: "Glass Channels", requiredQty: req?.glassChannels ?? 0, unit: "pcs" },
+  ];
+
+  const additionalCharges = ["Hardware", "Loading & Unloading", "Transport", "Labour Charges"];
+
+  const getStatusMessage = (name: string, requiredQty: number, unit: string) => {
+    const sel = materials.find((m) => m.type === name);
+    const provided = sel?.quantity ?? 0;
+
+    if (requiredQty <= 0) return null;
+    if (!sel || provided === 0)
+      return <p className="text-xs text-red-500">Missing — required {requiredQty} {unit}</p>;
+    if (provided < requiredQty)
+      return <p className="text-xs text-orange-500">Insufficient — required {requiredQty} {unit}, provided {provided}</p>;
+    return null;
+  };
+
+  const findRate = (typeName: string) => {
+    for (const cat of MATERIAL_HIERARCHY) {
+      for (const t of cat.types) {
+        if (t.type.toLowerCase().includes(typeName.toLowerCase().split(" ")[0])) return t.rate;
+        if (t.type.toLowerCase() === typeName.toLowerCase()) return t.rate;
+      }
+    }
+    return 0;
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Gypsum Section */}
+      <div>
+        <p className="font-semibold text-black">Gypsum Side</p>
+        <p className="text-xs text-gray-600">
+          Gypsum components for the partition (Gypsum Height: {gypsumHeight} ft)
+        </p>
+        <div className="space-y-2 mt-2 bg-white p-3 rounded-md">
+          {gypsumSection.map(({ name, requiredQty, unit }) => {
+            const selected = materials.find((m) => m.type === name);
+            const defaultRate = findRate(name) || (name.includes("Joint") ? 0 : 415);
+
+            return (
+              <div key={name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={!!selected}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setMaterials((prev) => {
+                          const exists = prev.find((m) => m.type === name);
+                          if (exists)
+                            return prev.map((m) =>
+                              m.type === name ? { ...m, quantity: requiredQty, rate: defaultRate } : m
+                            );
+                          return [...prev, { type: name, quantity: requiredQty, unit, rate: defaultRate }];
+                        });
+                      } else {
+                        setMaterials((prev) => prev.filter((m) => m.type !== name));
+                      }
+                    }}
+                  />
+                  <div>
+                    <div className="text-black">{name}</div>
+                    <div className="text-xs text-gray-600">Required: {requiredQty} {unit}</div>
+                    {getStatusMessage(name, requiredQty, unit)}
+                  </div>
+                </div>
+                {selected && (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.quantity}
+                      onChange={(e) => {
+                        const qty = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => (m.type === name ? { ...m, quantity: qty } : m)));
+                      }}
+                      className="w-20 text-black"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.rate || 0}
+                      onChange={(e) => {
+                        const rate = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => (m.type === name ? { ...m, rate } : m)));
+                      }}
+                      className="w-20 text-black"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Glass Section */}
+      <div>
+        <p className="font-semibold text-black">Glass Side</p>
+        <p className="text-xs text-gray-600">
+          Glass components for the partition (Glass Height: {glassHeight ?? 0} ft)
+        </p>
+        <div className="space-y-2 mt-2 bg-white p-3 rounded-md">
+          {glassSection.map(({ name, requiredQty, unit }) => {
+            const selected = materials.find((m) => m.type === name);
+            const defaultRate = findRate(name) || 0;
+
+            return (
+              <div key={name} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={!!selected}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setMaterials((prev) => {
+                          const exists = prev.find((m) => m.type === name);
+                          if (exists)
+                            return prev.map((m) =>
+                              m.type === name ? { ...m, quantity: requiredQty, rate: defaultRate } : m
+                            );
+                          return [...prev, { type: name, quantity: requiredQty, unit, rate: defaultRate }];
+                        });
+                      } else {
+                        setMaterials((prev) => prev.filter((m) => m.type !== name));
+                      }
+                    }}
+                  />
+                  <div>
+                    <div className="text-black">{name}</div>
+                    <div className="text-xs text-gray-600">Required: {requiredQty} {unit}</div>
+                    {getStatusMessage(name, requiredQty, unit)}
+                  </div>
+                </div>
+                {selected && (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.quantity}
+                      onChange={(e) => {
+                        const qty = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => (m.type === name ? { ...m, quantity: qty } : m)));
+                      }}
+                      className="w-20 text-black"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      value={selected.rate || 0}
+                      onChange={(e) => {
+                        const rate = Number(e.target.value || 0);
+                        setMaterials((prev) => prev.map((m) => (m.type === name ? { ...m, rate } : m)));
+                      }}
+                      className="w-20 text-black"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Additional Charges */}
+      <div className="space-y-2 mt-4">
+        <p className="font-semibold text-black">Additional Charges</p>
+        {additionalCharges.map((charge) => {
+          const selected = materials.find((m) => m.type === charge);
+          const defaultRate = findRate(charge);
+          const isMissingOrInsufficient = selected && (selected.quantity === 0 || selected.rate === 0);
+
+          return (
+            <div key={charge} className="flex items-center gap-2 pl-4 bg-white p-3 rounded-md">
+              <span className="text-black w-44">{charge}
+                {isMissingOrInsufficient && <div className="text-xs text-red-500 font-semibold">⚠️ Enter quantity & rate</div>}
+              </span>
+              <Input
+                type="number"
+                min={0}
+                placeholder="Qty"
+                value={selected?.quantity ?? ""}
+                onChange={(e) => {
+                  const qty = Number(e.target.value || 0);
+                  setMaterials((prev) => {
+                    const exists = prev.find((m) => m.type === charge);
+                    if (exists) return prev.map((m) => (m.type === charge ? { ...m, quantity: qty } : m));
+                    return [...prev, { type: charge, quantity: qty, unit: charge === "Labour Charges" ? "Qty" : "pcs", rate: selected?.rate ?? defaultRate }];
+                  });
+                }}
+                className="w-20 text-black"
+              />
+              <Input
+                type="number"
+                min={0}
+                placeholder="Rate"
+                value={selected?.rate ?? ""}
+                onChange={(e) => {
+                  const rate = Number(e.target.value || 0);
+                  setMaterials((prev) => {
+                    const exists = prev.find((m) => m.type === charge);
+                    if (exists) return prev.map((m) => (m.type === charge ? { ...m, rate } : m));
+                    return [...prev, { type: charge, quantity: 1, unit: charge === "Labour Charges" ? "Qty" : "pcs", rate }];
+                  });
+                }}
+                className="w-20 text-black"
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Navigation */}
+      <div className="flex gap-2 mt-4">
+        <Button onClick={handleBack} className="border-cyan-500 text-white">Back</Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSubmitFinal} className="bg-cyan-500 text-black">Next: View Cost Summary</Button>
+          <Button onClick={handleSubmit} className="bg-cyan-500 text-black">Add Wall Partition</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+  const gypsumCategories: Record<string, string[]> = {
+    Boards: ["12mm Gypsum Board"],
+    Rockwool: ["Rockwool 50mm"],
+    Channel: ["Floor Channel"],
+    "GI Stud": ["GI Stud"],
+    Fixings: ["Joint Tape", "Jointing Compound"],
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Main Materials */}
+      {MATERIAL_HIERARCHY.filter((cat) => {
+        if (wallType === "gypsum") return ["Gypsum"].includes(cat.category);
+        if (wallType === "plywood") return ["Plywood"].includes(cat.category);
+        return ["Bricks", "Cement", "Sand"].includes(cat.category);
+      }).map((mat) => (
+        <div key={mat.category} className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-white">{mat.category}</p>
+            <div>
+              {liveStatus[mat.category] && (
+                <span className={`text-sm ${liveStatus[mat.category].ok ? "text-green-400" : "text-red-600"}`}>
+                  {liveStatus[mat.category].ok ? "OK" : liveStatus[mat.category].message}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 pl-4 bg-white p-3 rounded-md">
+            {/* Civil Wastage */}
+            {wallType === "civil" && mat.category === "Bricks" && (
+              <div className="mb-2 flex items-center gap-2">
+                <label className="text-black font-semibold">Brick Wastage %:</label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={brickWastage}
+                  onChange={(e) => setBrickWastage(Number(e.target.value) || 0)}
+                  className="w-20 text-black"
+                />
+              </div>
+            )}
+
+           {/* Render Materials */}
+{wallType === "gypsum" &&
+  Object.entries(gypsumCategories).map(([catName, types]) => (
+    <div key={catName} className="space-y-2">
+      <p className="font-semibold text-black">{catName}</p>
+      {types.map((typeName) => {
+        const selected = materials.find((m) => m.type === typeName);
+
+        // Compute required quantities for gypsum
+        const req = computeRequired(
+          "gypsum",
+          length,
+          height,
+          undefined,
+          subOption,
+          brickWastage,
+          undefined,
+          glassHeight
+        );
+
+        // Default quantities
+        const defaultQty =
+          typeName === "12mm Gypsum Board"
+            ? req.boards ?? 1
+            : typeName === "Rockwool 50mm"
+            ? req.rockwoolBags ?? 0 // number of bags
+            : typeName === "Floor Channel"
+            ? req.floorChannel ?? 1
+            : typeName === "GI Stud"
+            ? req.studs ?? 1
+            : typeName === "Joint Tape"
+            ? req.jointTape ?? 1
+            : req.jointCompound ?? 1;
+
+        const isRockwool = typeName === "Rockwool 50mm";
+        const unit = isRockwool ? "bags" : "pcs";
+
+        const statusForItem =
+          selected && selected.quantity >= defaultQty
+            ? { ok: true }
+            : { ok: false, message: `Missing — required ${defaultQty} ${unit}` };
+
+        return (
+          <div key={typeName} className="flex items-center gap-2">
+            <Checkbox
+              checked={!!selected}
+              onCheckedChange={(checked) => {
+                if (checked) {
+                  setMaterials((prev) => {
+                    const exists = prev.find((m) => m.type === typeName);
+                    const rate = findRate(typeName); // 1850 for Rockwool, board rate for others
+
+                    if (exists)
+                      return prev.map((m) =>
+                        m.type === typeName
+                          ? { ...m, quantity: defaultQty, rate }
+                          : m
+                      );
+                    return [...prev, { type: typeName, quantity: defaultQty, unit, rate }];
+                  });
+                } else {
+                  setMaterials((prev) => prev.filter((m) => m.type !== typeName));
+                }
+              }}
+            />
+            <span className="text-black w-48">{typeName}</span>
+            <div className="flex-1 text-sm">
+              {statusForItem.ok ? (
+                <span className="text-green-600">OK</span>
+              ) : (
+                <span className="text-red-600">{statusForItem.message}</span>
+              )}
+            </div>
+            {selected && (
+              <Input
+                type="number"
+                min={0}
+                value={selected.quantity}
+                onChange={(e) => {
+                  const qty = Number(e.target.value || 0);
+                  setMaterials((prev) =>
+                    prev.map((m) =>
+                      m.type === typeName ? { ...m, quantity: qty } : m
+                    )
+                  );
+                }}
+                className="w-20 text-black"
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  ))}
+
+
+           {/* Plywood / Hybrid Materials */}
+{wallType === "plywood" && (() => {
+    // 1. Determine if it's a Hybrid wall
+    const isHybrid = typeof subOption === "string" && /gypsum\s*\+?\s*plywood/i.test(subOption || "");
+    
+    // 2. Determine the Plywood Board Type
+    const boardType = subOption === "Double Glazing" ? "12mm Plywood Board" : "18mm Plywood Board";
+    
+    // 3. Calculate Required Quantities (Assuming computeRequired is defined elsewhere)
+    const req = computeRequired(
+        isHybrid ? "gypsum" : "plywood", 
+        length,
+        height,
+        undefined,
+        subOption,
+        brickWastage,
+        plywoodSelection?.type,
+        glassHeight,
+        "Single" // Default plywood layering
+    );
+
+    // 4. Rate Lookup Function (getPlywoodRate must be defined outside or inside this function)
+    const getPlywoodRate = (baseName: string, type?: string): number => {
+        const baseRates: Record<string, number> = {
+            "18mm Plywood Board": 1650, "12mm Plywood Board": 1540,
+            "Rockwool": 1850, "2/1 Aluminium Channel": 250,
+            "Laminate": 350, "12mm Gypsum Board": 350,
+            "Joint Tape": 200, "Jointing Compound": 703, "GI Stud": 177
+        };
+        const baseRate = baseRates[baseName] || 0;
+        let multiplier = 1;
+        if (type?.includes("Marine")) multiplier = 1.15;
+        else if (type?.includes("BWP")) multiplier = 1.25;
+        else if (type?.includes("BWR")) multiplier = 1.20;
+        
+        // Convert sheet rate to kg rate for Rockwool
+        if (baseName === "Rockwool") {
+            return Math.round((baseRate * multiplier) / 10); 
+        }
+        return Math.round(baseRate * multiplier);
+    };
+
+    // 5. Define Material List (Core Plywood/Structure Items)
+    let plywoodItems: Array<{ name: string; requiredQty: number; unit: string; optional?: boolean }> = [
+        { name: boardType, requiredQty: req.boards ?? req.boardsPlywood ?? 0, unit: "pcs" },
+        { name: "Rockwool", requiredQty: req.rockwoolKg ?? req.rockwoolBags ?? 0, unit: "kg", optional: true },
+        { name: "2/1 Aluminium Channel", requiredQty: req.aluminiumChannels ?? 0, unit: "pcs" }, 
+        { name: "Laminate", requiredQty: req.laminateSheets ?? 0, unit: "pcs" },
+    ];
+
+    // 6. Add Gypsum items for Hybrid walls
+    if (isHybrid) {
+        const gypsumItems = [
+            { name: "12mm Gypsum Board", requiredQty: req.boardsGypsum ?? 0, unit: "pcs" },
+            { name: "Joint Tape", requiredQty: req.jointTape ?? 0, unit: "pcs" },
+            { name: "Jointing Compound", requiredQty: req.jointCompound ?? 0, unit: "pcs" },
+            { name: "GI Stud", requiredQty: req.studsGypsum ?? 0, unit: "pcs" }, 
+        ];
+        plywoodItems = [...gypsumItems, ...plywoodItems];
+    }
+
+    // 7. Render the list with Checkboxes and Inputs (FIXED)
+    return (
+        <div className="space-y-4 p-4 bg-gray-100 rounded">
+            <h3 className="font-semibold text-xl text-black">
+                {isHybrid ? "Hybrid Gypsum + Plywood" : "Plywood Partition"} Components
+            </h3>
+            <p className="text-sm text-gray-600">
+                Type: **{plywoodSelection?.type || "Commercial"}** | Cladding: **{subOption || "Single"}**
+            </p>
+            
+            <div className="bg-white p-4 rounded-md space-y-3">
+                {plywoodItems.map(({ name, requiredQty, unit, optional }) => {
+                    if (requiredQty <= 0.01) return null; // Skip if quantity is negligible
+
+                    const selected = materials.find((m) => m.type === name);
+                    const defaultRate = getPlywoodRate(name, plywoodSelection?.type);
+                    // const missing = Math.max(requiredQty - (selected?.quantity || 0), 0); // Not used in rendering now
+                    const currentStatus = liveStatus[name]; 
+                    const isMissingOrInsufficient = currentStatus && !currentStatus.ok;
+
+                    return (
+                        <div key={name} className="space-y-1">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-1">
+                                  
+                                    {/* --- CHECKBOX: Allows selection/deselection --- */}
+                                    <Checkbox
+                                        checked={!!selected}
+                                        onCheckedChange={(checked) => {
+                                            if (checked) {
+                                                setMaterials((prev) => {
+                                                    const exists = prev.find((m) => m.type === name);
+                                                    if (exists)
+                                                        return prev.map((m) =>
+                                                            m.type === name ? { ...m, quantity: requiredQty, rate: defaultRate } : m
+                                                        );
+                                                    return [...prev, { type: name, quantity: requiredQty, unit, rate: defaultRate }];
+                                                });
+                                            } else {
+                                                setMaterials((prev) => prev.filter((m) => m.type !== name));
+                                            }
+                                        }}
+                                    />
+                                    <span className="text-black w-40">
+                                        {name}
+                                        {optional && <span className="text-gray-500 text-xs ml-2">(optional)</span>}
+                                        {isMissingOrInsufficient && (
+                                            <div className="text-xs text-red-500 font-semibold">⚠️ {currentStatus.message}</div>
+                                        )}
+                                    </span>
+                                </div>
+                                
+                                <span className="text-gray-600 text-sm w-48 text-right">
+                                    Req: **{requiredQty.toFixed(2)}** {unit}
+                                </span>
+
+                                {/* --- INPUTS: Visible ONLY when the item is selected --- */}
+                                {selected ? (
+                                    <div className="flex items-center gap-2 ml-4">
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={selected.quantity}
+                                            onChange={(e) => {
+                                                const qty = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === name ? { ...m, quantity: qty } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                            placeholder="Qty"
+                                        />
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={selected.rate || defaultRate}
+                                            onChange={(e) => {
+                                                const rate = Number(e.target.value || 0);
+                                                setMaterials((prev) =>
+                                                    prev.map((m) => (m.type === name ? { ...m, rate } : m))
+                                                );
+                                            }}
+                                            className="w-20 text-black"
+                                            placeholder="Rate"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="w-44 text-right">
+                                        {/* Placeholder to maintain layout when inputs are hidden */}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* You would typically include the Additional Charges section and Navigation buttons here */}
+        </div>
+    );
+})()}
+
+            {/* Civil Materials */}
+            {wallType !== "gypsum" && wallType !== "plywood" &&
+              mat.types.map((t) => {
+                const typeName = t.type;
+                const selected = materials.find((m) => m.type === typeName);
+                let defaultQty = 1;
+                let unit = mat.unit;
+                let defaultRate = t.rate || 0;
+
+                if (wallType === "civil") {
+                  const req = computeRequired("civil", length, height, undefined, subOption, brickWastage, undefined, glassHeight);
+                  if (typeName.includes("Brick")) defaultQty = req.roundedBricks ?? 1;
+                  if (typeName.includes("Cement")) defaultQty = req.roundedCementBags ?? 1;
+                  if (typeName.includes("Sand")) defaultQty = req.roundedSandCubicFt ?? 1;
+                }
+
+                return (
+                  <div key={typeName} className="flex items-center gap-2">
+                    <Checkbox
+                      checked={!!selected}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setMaterials((prev) => {
+                            const exists = prev.find((m) => m.type === typeName);
+                            if (exists)
+                              return prev.map((m) =>
+                                m.type === typeName ? { ...m, quantity: defaultQty, rate: defaultRate } : m
+                              );
+                            return [...prev, { type: typeName, quantity: defaultQty, unit, rate: defaultRate }];
+                          });
+                        } else {
+                          setMaterials((prev) => prev.filter((m) => m.type !== typeName));
+                        }
+                      }}
+                    />
+                    <span className="text-black w-44">{typeName}</span>
+                    {selected && (
+                      <Input
+                        type="number"
+                        min={0}
+                        value={selected.quantity}
+                        onChange={(e) => {
+                          const qty = Number(e.target.value || 0);
+                          setMaterials((prev) =>
+                            prev.map((m) =>
+                              m.type === typeName ? { ...m, quantity: qty } : m
+                            )
+                          );
+                        }}
+                        className="w-20 text-black"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      ))}
+
+      {/* Additional Charges */}
+<div className="space-y-2 mt-4">
+  <p className="font-semibold text-white">Additional Charges</p>
+
+  {["Hardware", "Loading & Unloading", "Transport", "Labour Charges"].map((charge) => {
+    const selected = materials.find((m) => m.type === charge);
+
+    return (
+      <div key={charge} className="flex items-center gap-2 pl-4 bg-white p-3 rounded-md">
+        <span className="text-black w-44">{charge}</span>
+
+        <Input
+          type="number"
+          min={0}
+          placeholder="Qty"
+          value={selected?.quantity ?? ""}
+          onChange={(e) => {
+            const qty = Number(e.target.value || 0);
+            setMaterials((prev) => {
+              const exists = prev.find((m) => m.type === charge);
+              if (exists)
+                return prev.map((m) =>
+                  m.type === charge ? { ...m, quantity: qty } : m
+                );
+              return [...prev, { type: charge, quantity: qty, unit: "pcs", rate: 0 }];
+            });
+          }}
+          className="w-20 text-black"
+        />
+
+        <Input
+          type="number"
+          min={0}
+          placeholder="Rate"
+          value={selected?.rate ?? ""}
+          onChange={(e) => {
+            const rate = Number(e.target.value || 0);
+            setMaterials((prev) => {
+              const exists = prev.find((m) => m.type === charge);
+              if (exists)
+                return prev.map((m) =>
+                  m.type === charge ? { ...m, rate } : m
+                );
+              return [...prev, { type: charge, quantity: 1, unit: "pcs", rate }];
+            });
+          }}
+          className="w-20 text-black"
+        />
+      </div>
+    );
+  })}
+</div>
+
+
+      {/* Navigation */}
+      <div className="flex gap-2 mt-4">
+        <Button onClick={handleBack} className="border-cyan-500 text-white">Back</Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSubmitFinal} className="bg-cyan-500 text-black">Next: View Cost Summary</Button>
+          <Button onClick={handleSubmit} className="bg-cyan-500 text-black">Add Wall Partition</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
