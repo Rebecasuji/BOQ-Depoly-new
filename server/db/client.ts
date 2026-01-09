@@ -1,15 +1,12 @@
 import pg from "pg";
-import path from "path";
 import dotenv from "dotenv";
 
 /**
- * Load .env ONLY for local development
- * Render / Vercel already inject env vars
+ * Load .env only in local development
+ * Render injects env vars automatically
  */
 if (process.env.NODE_ENV !== "production") {
-  const envPath = path.resolve(process.cwd(), ".env");
-  console.log("[db-client] Loading local .env from:", envPath);
-  dotenv.config({ path: envPath });
+  dotenv.config();
 }
 
 const connectionString =
@@ -25,9 +22,6 @@ const poolConfig: pg.PoolConfig = {
   connectionString,
 };
 
-/**
- * Supabase / hosted Postgres requires SSL
- */
 if (connectionString.includes("supabase")) {
   poolConfig.ssl = {
     rejectUnauthorized: false,
@@ -40,7 +34,6 @@ pool.on("error", (err) => {
   console.error("[db-pool] Unexpected error:", err);
 });
 
-// Non-blocking test connection
 pool
   .connect()
   .then((client) => {
