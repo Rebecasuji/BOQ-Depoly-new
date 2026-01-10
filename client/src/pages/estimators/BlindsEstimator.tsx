@@ -187,12 +187,13 @@ export default function BlindsEstimator() {
               {/* STEP 3: REVIEW */}
               {step === 3 && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-                  <div className="grid grid-cols-4 gap-4 px-4 font-bold text-xs text-muted-foreground border-b pb-2">
-                    <span>Item</span><span>Quantity</span><span>Rate (₹)</span><span className="text-right">Total</span>
+                  <div className="grid grid-cols-5 gap-4 px-4 font-bold text-xs text-muted-foreground border-b pb-2">
+                    <span>Item</span><span>Description</span><span>Quantity</span><span>Rate (₹)</span><span className="text-right">Total</span>
                   </div>
                   {getMaterialsWithDetails().map(mat => (
-                    <div key={mat.id} className="grid grid-cols-4 gap-4 items-center p-3 border rounded-lg bg-card shadow-sm">
+                    <div key={mat.id} className="grid grid-cols-5 gap-4 items-center p-3 border rounded-lg bg-card shadow-sm">
                       <span className="text-sm font-medium">{mat.name}</span>
+                      <span className="text-xs">{materialDescriptions[mat.id] || mat.name}</span>
                       <Input type="number" value={mat.quantity} onChange={e => setEditableMaterials({...editableMaterials, [mat.id!]: {...editableMaterials[mat.id!], quantity: Number(e.target.value)}})} />
                       <Input type="number" value={mat.rate} onChange={e => setEditableMaterials({...editableMaterials, [mat.id!]: {...editableMaterials[mat.id!], rate: Number(e.target.value)}})} />
                       <span className="text-right font-bold">{(mat.quantity * mat.rate).toFixed(2)}</span>
@@ -200,7 +201,7 @@ export default function BlindsEstimator() {
                   ))}
                   <div className="flex justify-between pt-6"><Button variant="outline" onClick={() => setStep(2)}>Back</Button><Button onClick={() => setStep(4)}>Generate BOM</Button></div>
                 </motion.div>
-              )}
+              )
 
               {/* STEP 4: BOM SUMMARY */}
               {step === 4 && (

@@ -203,12 +203,12 @@ export default function PaintingEstimator() {
                  </div>
                  <table className="w-full text-sm">
                     <thead className="bg-slate-50">
-                        <tr><th className="p-2 text-left">Item</th><th className="p-2">Qty</th><th className="p-2">Shop</th><th className="p-2 text-right">Amount</th></tr>
+                        <tr><th className="p-2 text-left">Item</th><th className="p-2 text-left">Description</th><th className="p-2">Qty</th><th className="p-2">Shop</th><th className="p-2 text-right">Amount</th></tr>
                     </thead>
                     <tbody>
                         {currentMaterials.map((m, i) => (
                             <tr key={i} className="border-b">
-                                <td className="p-2">{m.name}</td><td className="p-2 text-center">{m.quantity} {m.unit}</td><td className="p-2 text-center">{m.shopName}</td><td className="p-2 text-right">₹{m.amount.toFixed(2)}</td>
+                                <td className="p-2">{m.name}</td><td className="p-2 text-sm">{materialDescriptions[m.id] || m.name}</td><td className="p-2 text-center">{m.quantity} {m.unit}</td><td className="p-2 text-center">{m.shopName}</td><td className="p-2 text-right">₹{m.amount.toFixed(2)}</td>
                             </tr>
                         ))}
                     </tbody>

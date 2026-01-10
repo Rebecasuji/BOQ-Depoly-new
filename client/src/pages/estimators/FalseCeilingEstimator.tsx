@@ -410,6 +410,7 @@ export default function FalseCeilingEstimator() {
                         {[
                           "S.No",
                           "Item",
+                          "Description",
                           "Unit",
                           "Qty",
                           "Rate",
@@ -434,6 +435,7 @@ export default function FalseCeilingEstimator() {
                           <tr key={m.id}>
                             <td className="border p-2">{i + 1}</td>
                             <td className="border p-2">{m.name}</td>
+                            <td className="border p-2">{materialDescriptions[m.id] || m.name}</td>
                             <td className="border p-2">{m.unit}</td>
                             <td className="border p-2">{q}</td>
                             <td className="border p-2">{r}</td>
