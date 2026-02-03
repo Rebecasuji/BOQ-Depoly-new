@@ -216,23 +216,42 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) {
       setLocation("/");
+      return;
+    }
+
+    // Redirect to role-specific dashboards
+    switch (user.role) {
+      case 'admin':
+        setLocation("/admin/dashboard");
+        break;
+      case 'software_team':
+        setLocation("/software/dashboard");
+        break;
+      case 'purchase_team':
+        setLocation("/purchase/dashboard");
+        break;
+      case 'supplier':
+        setLocation("/supplier/dashboard");
+        break;
+      default:
+        // Stay on generic dashboard for users
+        break;
     }
   }, [user, setLocation]);
 
   if (!user) return null;
 
+  // This component should now redirect, but keep as fallback
   if (user.role === 'admin' || user.role === 'software_team') {
     return <AdminDashboard />;
   }
 
   if (user.role === 'supplier') {
-     // Supplier: show Material Management page directly
      return <SupplierMaterials />;
   }
 
   if (user.role === 'purchase_team') {
-     // Purchase team: access admin dashboard for Item Master
-     return <AdminDashboard />; 
+     return <AdminDashboard />;
   }
 
   // Client / User role

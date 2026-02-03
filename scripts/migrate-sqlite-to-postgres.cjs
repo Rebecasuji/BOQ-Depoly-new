@@ -15,7 +15,7 @@ async function main() {
   const materials = sqlite.prepare('SELECT * FROM materials').all();
 
   const pool = new Pool({ 
-    connectionString: process.env.DATABASE_URL || 'postgresql://boq_admin:boq_admin_pass@localhost:5432/boq'
+    connectionString: process.env.DATABASE_URL
   });
   try {
     console.log('Connecting to Postgres...');

@@ -7,7 +7,7 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL || 'postgres://boq_admin:boq_admin_pass@localhost:5432/boq' });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // A few representative shops to seed (no explicit UUIDs; Postgres will generate them)
 const shops = [

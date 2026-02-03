@@ -1,68 +1,310 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useData } from "@/lib/store";
-import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, Download, ChevronLeft } from "lucide-react";
 import html2pdf from "html2pdf.js";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { useData, Material, Product } from "@/lib/store";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ChevronRight,
+  ChevronLeft,
+  Download,
+  CheckCircle2,
+  Star,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import apiFetch from "@/lib/api";
 
 const ctintLogo = "/image.png";
 
+interface SelectedMaterialConfig {
+  materialId: string;
+  selectedShopId: string;
+  selectedBrand?: string;
+}
+
+interface MaterialWithQuantity {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  rate: number;
+  shopId: string;
+  shopName: string;
+  installRate?: number;
+}
+
+// Flooring-specific matchers
+const normText = (s?: string) => (s || "").toString().toUpperCase();
+const norm = (s?: string) =>
+  (s || "")
+    .toString()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .trim();
+
+const flooringKeywords = ["FLOOR", "TILE", "MARBLE", "WOOD", "LAMINATE", "VINYL", "CARPET"];
+
+const isFlooringMaterial = (m: any) => {
+  const prod = normText(m.product);
+  const name = normText(m.name);
+  const cat = normText(m.category);
+  return flooringKeywords.some(
+    (kw) => prod.includes(kw) || name.includes(kw) || cat.includes(kw),
+  );
+};
+
+const getBrandOfMaterial = (m: any) =>
+  (m.brandName || m.brand || m.make || m.manufacturer || m.company || "Generic").toString();
+
 export default function FlooringEstimator() {
-  const { shops: storeShops, materials: storeMaterials } = useData();
+  const {
+    shops: storeShops,
+    materials: storeMaterials,
+    products: storeProducts,
+  } = useData();
+  const { toast } = useToast();
+
   const [step, setStep] = useState(1);
-  
-  // Selection States
-  const [areaName, setAreaName] = useState("Living Room");
+  const [selectedFlooringProductId, setSelectedFlooringProductId] = useState<string>("");
+  const [selectedFlooringProductLabel, setSelectedFlooringProductLabel] = useState<string>("");
+  const [areaName, setAreaName] = useState<string>("");
   const [length, setLength] = useState<number>(10);
   const [width, setWidth] = useState<number>(10);
-  const [selectedMaterials, setSelectedMaterials] = useState<{materialId: string, selectedShopId: string}[]>([]);
-  const [editableMaterials, setEditableMaterials] = useState<Record<string, { quantity: number; rate: number }>>({});
-
-  // Final BOQ States
-  const [finalBillNo, setFinalBillNo] = useState(`INV-${Date.now().toString().slice(-6)}`);
-  const [finalBillDate, setFinalBillDate] = useState(new Date().toISOString().split('T')[0]);
-  const [finalDueDate, setFinalDueDate] = useState(new Date().toISOString().split('T')[0]);
-  const [finalCustomerName, setFinalCustomerName] = useState("");
-  const [finalCustomerAddress, setFinalCustomerAddress] = useState("");
-  const [finalTerms, setFinalTerms] = useState("Payment due within 15 days");
-  const [finalShopDetails, setFinalShopDetails] = useState("");
-  // Material-wise descriptions
+  const [selectedMaterials, setSelectedMaterials] = useState<SelectedMaterialConfig[]>([]);
+  const [editableMaterials, setEditableMaterials] = useState<
+    Record<string, { quantity: number; supplyRate: number; installRate: number }>
+  >({});
   const [materialDescriptions, setMaterialDescriptions] = useState<Record<string, string>>({});
-  const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [materialLocations, setMaterialLocations] = useState<Record<string, string>>({});
+  const [materialQtys, setMaterialQtys] = useState<Record<string, number>>({});
+  const [materialUnits, setMaterialUnits] = useState<Record<string, string>>({});
+  const [step11SupplyRates, setStep11SupplyRates] = useState<Record<string, number>>({});
+  const [step11InstallRates, setStep11InstallRates] = useState<Record<string, number>>({});
+  const [finalBillNo, setFinalBillNo] = useState<string>("");
+  const [finalBillDate, setFinalBillDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [finalCustomerName, setFinalCustomerName] = useState<string>("");
+  const [finalCustomerAddress, setFinalCustomerAddress] = useState<string>("");
+  const [finalCompanyName, setFinalCompanyName] = useState<string>("Concept Trunk Interiors");
+  const [finalCompanyAddress, setFinalCompanyAddress] = useState<string>(
+    "12/36A, Indira Nagar\nMedavakkam\nChennai Tamil Nadu 600100\nIndia",
+  );
+  const [finalCompanyGST, setFinalCompanyGST] = useState<string>("33ASOPS5560M1Z1");
+  const [finalShopDetails, setFinalShopDetails] = useState<string>("");
+  const [dbStep11Items, setDbStep11Items] = useState<any[]>([]);
+  const [savingStep4, setSavingStep4] = useState<boolean>(false);
 
-  const availableFlooring = storeMaterials.filter(m => m.category?.toLowerCase() === "flooring");
+  // Get flooring products only
+  const flooringProducts = (storeProducts || [])
+    .filter((p: any) => {
+      const name = normText(p.name || p.title || p.label || "");
+      return flooringKeywords.some((kw) => name.includes(kw));
+    })
+    .slice()
+    .sort((a: any, b: any) => {
+      const la = (a?.name || "").toString();
+      const lb = (b?.name || "").toString();
+      return la.localeCompare(lb);
+    });
 
-  const getBestShop = (materialName: string) => {
-    const variants = storeMaterials.filter((m) => m.name === materialName);
-    return variants.length > 0 ? variants.reduce((p, c) => (p.rate < c.rate ? p : c)) : null;
+  // Get flooring materials only
+  const getAvailableMaterials = () => {
+    if (!selectedFlooringProductLabel || !storeMaterials.length) return [];
+    const prodLabel = selectedFlooringProductLabel.toString();
+    let matched = storeMaterials.filter((m) => {
+      const prod = normText(m.product);
+      const name = normText(m.name);
+      const p = normText(prodLabel);
+      return (prod.includes(p) || p.includes(prod)) && isFlooringMaterial(m);
+    });
+
+    if (!matched || matched.length === 0) {
+      matched = storeMaterials.filter(
+        (m) => isFlooringMaterial(m) && normText(m.product).includes(normText(prodLabel)),
+      );
+    }
+
+    const uniqueMap = new Map<string, (typeof matched)[0]>();
+    for (const mat of matched) {
+      const key = `${normText(mat.product)}__${normText(mat.name)}__${norm(mat.code)}`;
+      const existing = uniqueMap.get(key);
+      if (!existing || (mat.rate || 0) < (existing.rate || 0)) uniqueMap.set(key, mat);
+    }
+    return Array.from(uniqueMap.values());
   };
 
-  const calculateQty = () => Math.ceil((length * width) * 1.10);
+  const availableMaterials = getAvailableMaterials();
 
-  const getMaterialsWithDetails = () => {
-    return selectedMaterials.map(sel => {
-      const mat = storeMaterials.find(m => m.id === sel.materialId);
-      const shop = storeShops.find(s => s.id === sel.selectedShopId);
-      const override = editableMaterials[mat?.id || ""];
-      return {
-        ...mat,
-        quantity: override?.quantity ?? calculateQty(),
-        rate: override?.rate ?? mat?.rate ?? 0,
-        shopName: shop?.name || "Unknown",
-        description: mat?.name || "Flooring Material"
-      };
-    }).filter(m => m.id);
+  const getProductLabel = (p: any) =>
+    (p?.name || p?.title || p?.label || p?.productName || p?.product || "").toString();
+
+  const handleSelectFlooringProduct = (p: Product) => {
+    const label = getProductLabel(p);
+    setSelectedFlooringProductId((p as any).id || label);
+    setSelectedFlooringProductLabel(label);
+    setSelectedMaterials([]);
+    setEditableMaterials({});
+    setMaterialDescriptions({});
+    setMaterialLocations({});
   };
 
-  const calculateTotalCost = () => getMaterialsWithDetails().reduce((sum, m) => sum + (m.quantity * m.rate), 0);
+  const handleToggleMaterial = (matId: string) => {
+    const isSelected = selectedMaterials.some((m) => m.materialId === matId);
+    if (isSelected) {
+      setSelectedMaterials(selectedMaterials.filter((m) => m.materialId !== matId));
+    } else {
+      const material = availableMaterials.find((m) => m.id === matId);
+      if (!material) return;
+      const variants = storeMaterials.filter(
+        (m) =>
+          normText(m.product) === normText(material.product) &&
+          normText(m.name) === normText(material.name),
+      );
+      const bestShop = variants.sort((a, b) => (a.rate || 0) - (b.rate || 0))[0];
+      setSelectedMaterials([
+        ...selectedMaterials,
+        { materialId: matId, selectedShopId: bestShop?.shopId || "" },
+      ]);
+    }
+  };
 
-  // Financials for Step 5
+  const handleChangeBrand = (matId: string, newBrand: string) => {
+    setSelectedMaterials(
+      selectedMaterials.map((m) =>
+        m.materialId === matId ? { ...m, selectedBrand: newBrand } : m,
+      ),
+    );
+  };
+
+  const handleChangeShop = (matId: string, newShopId: string) => {
+    setSelectedMaterials(
+      selectedMaterials.map((m) =>
+        m.materialId === matId ? { ...m, selectedShopId: newShopId } : m,
+      ),
+    );
+  };
+
+  const calculateQty = () => Math.ceil(length * width * 1.1);
+
+  const getMaterialsWithDetails = (): MaterialWithQuantity[] => {
+    return selectedMaterials
+      .map((selection) => {
+        let base = availableMaterials.find((m) => m.id === selection.materialId);
+        if (!base) base = storeMaterials.find((m) => m.id === selection.materialId) || null;
+        if (!base) return null;
+
+        const chosen =
+          storeMaterials.find((m) => {
+            const sameProd = normText(m.product) === normText(base.product);
+            const sameName = normText(m.name) === normText(base.name);
+            const sameShop = m.shopId === selection.selectedShopId;
+            const sameBrand = getBrandOfMaterial(m) === (selection.selectedBrand || "Generic");
+            return sameProd && sameName && sameShop && sameBrand;
+          }) || base;
+
+        const shop = storeShops.find((s) => s.id === selection.selectedShopId);
+        const override = editableMaterials[chosen.id];
+        const computedQty = calculateQty();
+        const quantity = override?.quantity ?? computedQty;
+        const supplyRate = override?.supplyRate ?? chosen.rate ?? 0;
+        const installRate = override?.installRate ?? 0;
+
+        return {
+          id: chosen.id,
+          name: chosen.name,
+          quantity,
+          unit: chosen.unit,
+          rate: supplyRate,
+          shopId: selection.selectedShopId,
+          shopName: shop?.name || "Unknown",
+          installRate,
+        };
+      })
+      .filter((m): m is MaterialWithQuantity => m !== null);
+  };
+
+  const calculateTotalCost = (): number => {
+    return getMaterialsWithDetails().reduce((sum, m) => sum + m.quantity * m.rate, 0);
+  };
+
+  const handleSaveStep4 = async () => {
+    setSavingStep4(true);
+    try {
+      const groups = getMaterialsWithDetails().map((m, idx) => ({
+        estimator: "flooring",
+        session_id: finalBillNo,
+        s_no: idx + 1,
+        item_name: m.name,
+        unit: m.unit || "sqft",
+        quantity: m.quantity,
+        location: areaName,
+        description: materialDescriptions[m.id || ""] || "",
+        supply_rate: m.rate || 0,
+        install_rate: m.installRate || 0,
+        supply_amount: m.quantity * (m.rate || 0),
+        install_amount: m.quantity * (m.installRate || 0),
+      }));
+
+      const res = await apiFetch("/api/estimator-step11-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups }),
+      });
+
+      if (!res.ok) throw new Error("Save failed");
+
+      toast({
+        title: "Success",
+        description: "Flooring BOQ saved successfully!",
+      });
+    } catch (err) {
+      console.error("Save error:", err);
+      toast({
+        title: "Error",
+        description: "Failed to save BOQ.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingStep4(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step === 11 && finalBillNo) {
+      apiFetch(`/api/estimator-step11-groups?session_id=${finalBillNo}&estimator=flooring`)
+        .then((res) => (res.ok ? res.json() : Promise.reject()))
+        .then((data) => setDbStep11Items(data.items || []))
+        .catch((err) => console.error("Failed to load step 11 data", err));
+    }
+  }, [step, finalBillNo]);
+
+  useEffect(() => {
+    if (step === 7) {
+      const details = getMaterialsWithDetails();
+      const map: Record<string, { quantity: number; supplyRate: number; installRate: number }> = {};
+      details.forEach((d) => {
+        map[d.id] = {
+          quantity: d.quantity || 0,
+          supplyRate: d.rate || 0,
+          installRate: 0,
+        };
+      });
+      setEditableMaterials(map);
+    }
+  }, [step, selectedMaterials]);
+
+  const displayMaterials = getMaterialsWithDetails();
   const subTotal = calculateTotalCost();
   const sgst = subTotal * 0.09;
   const cgst = subTotal * 0.09;
@@ -70,258 +312,422 @@ export default function FlooringEstimator() {
   const roundOff = Math.round(grandTotal) - grandTotal;
 
   const handleExportPDF = () => {
-    const element = document.getElementById(step === 4 ? "boq-pdf" : "boq-final-pdf");
+    const element = document.getElementById("boq-pdf");
     if (!element) return;
-    html2pdf().from(element as HTMLElement).save(`Flooring_BOQ_${finalCustomerName || 'Estimate'}.pdf`);
+    html2pdf()
+      .set({
+        margin: 10,
+        filename: `Flooring_BOQ_${finalBillNo}.pdf`,
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      })
+      .from(element)
+      .save();
   };
-
-  useEffect(() => {
-    if (step === 5) {
-      const first = getMaterialsWithDetails()[0];
-      const shop = storeShops.find((s) => s.id === first?.shopId);
-      if (shop) {
-        const parts = [shop.name || "", shop.address || "", shop.area || "", shop.city || "", shop.state || "", shop.pincode || "", shop.gstNo ? `GSTIN: ${shop.gstNo}` : "", shop.phone || ""].filter(Boolean);
-        setFinalShopDetails(parts.join("\n"));
-      }
-    }
-  }, [step, selectedMaterials, storeShops]);
 
   return (
     <Layout>
-      <div className="max-w-6xl mx-auto space-y-8 pb-20">
+      <div className="max-w-6xl mx-auto space-y-8">
         <h2 className="text-3xl font-bold">Flooring Estimator</h2>
 
-        <Card>
-          <CardContent className="pt-8">
+        <Card className="border-border/50">
+          <CardContent className="pt-8 min-h-96">
             <AnimatePresence mode="wait">
-              
-              {/* STEP 1: Dimensions */}
+              {/* STEP 1: Select Product */}
               {step === 1 && (
-                <div className="space-y-4">
-                  <Label className="text-lg font-bold">Step 1: Project Area & Size</Label>
-                  <Input placeholder="Area Name" value={areaName} onChange={e => setAreaName(e.target.value)} />
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><Label>Length (ft)</Label><Input type="number" value={length} onChange={e => setLength(Number(e.target.value))} /></div>
-                    <div><Label>Width (ft)</Label><Input type="number" value={width} onChange={e => setWidth(Number(e.target.value))} /></div>
-                  </div>
-                  <Button className="w-full" onClick={() => setStep(2)}>Next</Button>
-                </div>
-              )}
+                <motion.div
+                  key="step1"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">Select Flooring Product</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Choose a flooring product type.
+                  </p>
 
-              {/* STEP 2: Selection */}
-              {step === 2 && (
-                <div className="space-y-4">
-                  <Label className="text-lg font-bold">Step 2: Select Materials & Shops</Label>
-                  {availableFlooring.map(mat => (
-                    <div key={mat.id} className="flex items-center justify-between p-3 border rounded hover:bg-muted/30">
-                      <div className="flex items-center gap-3">
-                        <Checkbox checked={selectedMaterials.some(s => s.materialId === mat.id)} 
-                          onCheckedChange={(checked) => {
-                            if(checked) setSelectedMaterials([...selectedMaterials, { materialId: mat.id, selectedShopId: getBestShop(mat.name)?.shopId || "" }]);
-                            else setSelectedMaterials(selectedMaterials.filter(s => s.materialId !== mat.id));
-                          }} 
-                        />
-                        <Label>{mat.name}</Label>
+                  <div className="grid gap-3">
+                    {flooringProducts.length === 0 ? (
+                      <div className="p-4 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded">
+                        No flooring products found.
                       </div>
-                      <Select value={selectedMaterials.find(s => s.materialId === mat.id)?.selectedShopId} onValueChange={(val) => setSelectedMaterials(selectedMaterials.map(s => s.materialId === mat.id ? {...s, selectedShopId: val} : s))}>
-                        <SelectTrigger className="w-48"><SelectValue placeholder="Select Shop" /></SelectTrigger>
-                        <SelectContent>{storeShops.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                  ))}
-                  <div className="flex justify-between"><Button variant="outline" onClick={() => setStep(1)}>Back</Button><Button disabled={selectedMaterials.length === 0} onClick={() => setStep(3)}>Next</Button></div>
-                </div>
-              )}
-
-              {/* STEP 3: Review Materials */}
-              {step === 3 && (
-                <div className="space-y-4">
-                  <Label className="text-lg font-bold">Step 3: Review Quantities & Rates</Label>
-                  <div className="grid grid-cols-4 gap-4 px-3 font-bold text-xs uppercase text-muted-foreground border-b pb-2">
-                    <span>Material Item</span><span>Quantity (sqft)</span><span>Rate (₹)</span><span className="text-right">Total (₹)</span>
-                  </div>
-                  {getMaterialsWithDetails().map(mat => (
-                    <div key={mat.id} className="grid grid-cols-4 gap-4 items-center p-3 border rounded">
-                      <span className="text-sm font-medium">{mat.name}</span>
-                      <Input type="number" value={mat.quantity} onChange={e => setEditableMaterials({...editableMaterials, [mat.id!]: {...editableMaterials[mat.id!], quantity: Number(e.target.value)}})} />
-                      <Input type="number" value={mat.rate} onChange={e => setEditableMaterials({...editableMaterials, [mat.id!]: {...editableMaterials[mat.id!], rate: Number(e.target.value)}})} />
-                      <span className="text-right font-bold">{(mat.quantity * mat.rate).toFixed(2)}</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between"><Button variant="outline" onClick={() => setStep(2)}>Back</Button><Button onClick={() => setStep(4)}>Generate BOM</Button></div>
-                </div>
-              )}
-
-              {/* STEP 4: GENERATE BOM (Requested Style) */}
-              {step === 4 && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                  <div className="text-center space-y-2">
-                    <div style={{ width: "64px", height: "64px", backgroundColor: "rgba(34,197,94,0.1)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto", color: "#22c55e" }}>
-                      <CheckCircle2 style={{ width: "32px", height: "32px" }} />
-                    </div>
-                    <h2 style={{ fontSize: "1.5rem", fontWeight: 700 }}>Bill of Materials (BOM)</h2>
-                    <p style={{ fontSize: "0.875rem", color: "#6b7280" }}>Generated on {new Date().toLocaleDateString()}</p>
+                    ) : (
+                      flooringProducts.map((p: any) => {
+                        const label = getProductLabel(p);
+                        const pid = (p?.id || label).toString();
+                        const isActive = selectedFlooringProductId === pid;
+                        return (
+                          <Button
+                            key={pid}
+                            variant={isActive ? "default" : "outline"}
+                            onClick={() => handleSelectFlooringProduct(p)}
+                            className="justify-start h-auto py-4"
+                          >
+                            <div className="font-semibold">{label}</div>
+                          </Button>
+                        );
+                      })
+                    )}
                   </div>
 
-                  <div id="boq-pdf" style={{ backgroundColor: "#ffffff", color: "#000000", fontFamily: "Arial, sans-serif", padding: "16px" }}>
-                    <div style={{ border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px" }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px", padding: "16px", fontSize: "0.875rem" }}>
-                        <div><p style={{ fontSize: "0.75rem", color: "#6b7280" }}>PROJECT AREA</p><p style={{ fontWeight: 600 }}>{areaName}</p></div>
-                        <div><p style={{ fontSize: "0.75rem", color: "#6b7280" }}>DIMENSIONS</p><p style={{ fontWeight: 600 }}>{length} ft × {width} ft</p></div>
-                      </div>
-                    </div>
-
-                    <div style={{ border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px", overflow: "hidden" }}>
-                      <div style={{ padding: "16px" }}>
-                        <h3 style={{ fontWeight: 600, marginBottom: "8px" }}>Materials Schedule</h3>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.875rem" }}>
-                          <thead style={{ backgroundColor: "#f3f4f6" }}>
-                            <tr>{["S.No","Item","Description","Unit","Qty","Rate (₹)","Supplier","Amount (₹)"].map((h) => (
-                              <th key={h} style={{ border: "1px solid #d1d5db", padding: "8px", textAlign: h === "Qty" || h.includes("Rate") || h.includes("Amount") ? "right" : "left" }}>{h}</th>
-                            ))}</tr>
-                          </thead>
-                          <tbody>
-                            {getMaterialsWithDetails().map((mat, index) => (
-                              <tr key={mat.id}>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px" }}>{index + 1}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px", fontWeight: 500 }}>{mat.name}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px" }}>{mat.id ? (materialDescriptions[mat.id] || mat.name) : mat.name}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px", textAlign: "center" }}>{mat.unit || 'sqft'}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px", textAlign: "center" }}>{mat.quantity}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px", textAlign: "right" }}>{mat.rate}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px" }}>{mat.shopName}</td>
-                                <td style={{ border: "1px solid #d1d5db", padding: "8px", textAlign: "right", fontWeight: 600 }}>{(mat.quantity * mat.rate).toFixed(2)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    <div style={{ border: "1px solid #d1d5db", borderRadius: "8px", padding: "16px", display: "flex", justifyContent: "space-between", backgroundColor: "#eff6ff" }}>
-                      <div><p style={{ fontSize: "0.875rem", color: "#6b7280" }}>Items</p><p style={{ fontWeight: 600 }}>{selectedMaterials.length}</p></div>
-                      <div style={{ textAlign: "right" }}><p style={{ fontSize: "0.875rem", color: "#6b7280" }}>Grand Total</p><p style={{ fontSize: "1.5rem", fontWeight: 700, color: "#1d4ed8" }}>₹{calculateTotalCost().toFixed(2)}</p></div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-4 justify-end pt-4">
-                    <Button onClick={() => setStep(3)} variant="outline">Back</Button>
-                    <button onClick={handleExportPDF} className="flex items-center gap-2 bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg hover:bg-blue-600 transition"><Download className="w-5 h-5" />Export PDF</button>
-                    <button onClick={() => setStep(5)} className="flex items-center gap-2 bg-indigo-600 text-white font-semibold px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Finalize BOQ</button>
-                    <button onClick={() => setStep(1)} className="flex items-center gap-2 bg-gray-200 text-gray-800 font-semibold px-4 py-2 rounded-lg hover:bg-gray-300 transition"><ChevronLeft className="w-5 h-5" />New Estimate</button>
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button
+                      onClick={() => setStep(2)}
+                      disabled={!selectedFlooringProductId}
+                    >
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
                   </div>
                 </motion.div>
               )}
 
-              {/* STEP 5: FINAL INVOICE (Doors-style Final BOQ) */}
-              {step === 5 && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                  <div className="grid grid-cols-3 gap-4">
-                    <div><Label>Bill No</Label><Input value={finalBillNo} onChange={e => setFinalBillNo(e.target.value)} /></div>
-                    <div><Label>Bill Date</Label><Input type="date" value={finalBillDate} onChange={e => setFinalBillDate(e.target.value)} /></div>
-                    <div><Label>Due Date</Label><Input type="date" value={finalDueDate} onChange={e => setFinalDueDate(e.target.value)} /></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div><Label>Customer Name</Label><Input value={finalCustomerName} onChange={e => setFinalCustomerName(e.target.value)} /></div>
-                    <div><Label>Customer Address</Label><Input value={finalCustomerAddress} onChange={e => setFinalCustomerAddress(e.target.value)} /></div>
-                  </div>
-                  <div><Label>Terms & Conditions</Label><Input value={finalTerms} onChange={e => setFinalTerms(e.target.value)} /></div>
+              {/* STEP 2: Material Selection */}
+              {step === 2 && (
+                <motion.div
+                  key="step2"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">Select Materials</Label>
 
-                  {/* MATERIAL DESCRIPTION INPUT */}
-                  <div className="space-y-4 border p-4 rounded-md bg-slate-50">
-                    <Label className="font-semibold">Material Description Entry</Label>
-                    <select className="w-full border rounded px-3 py-2" value={selectedMaterialId} onChange={(e) => setSelectedMaterialId(e.target.value)}>
-                      <option value="">Select Material</option>
-                      {getMaterialsWithDetails().map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
-                    </select>
-                    {selectedMaterialId && (<Input placeholder="Enter description for selected material" value={materialDescriptions[selectedMaterialId] || ""} onChange={(e) => setMaterialDescriptions((prev) => ({...prev,[selectedMaterialId]: e.target.value,}))} />)}
-                  </div>
-
-                  <div id="boq-final-pdf" style={{ width: "210mm", minHeight: "297mm", padding: "20mm", background: "#fff", color: "#000", fontFamily: "Helvetica, Arial, sans-serif", fontSize: 12 }}>
-                    
-                    {/* HEADER */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-                      <div style={{ width: "55%", lineHeight: 1.5, display: "flex", gap: 12 }}>
-                        <img src={ctintLogo} alt="Logo" style={{ height: 56, flexShrink: 0 }} />
-                        <div>
-                          <strong style={{ fontSize: 14 }}>Concept Trunk Interiors</strong><br />
-                          12/36A, Indira Nagar<br />
-                          Medavakkam<br />
-                          Chennai – 600100<br />
-                          GSTIN: 33ASOPS5560M1Z1
-
-                          <br /><br />
-
-                          <strong>Bill From</strong><br />
-                          <pre style={{ margin: 0, fontFamily: "Arial", whiteSpace: "pre-wrap", fontSize: 11 }}>
-                            {finalShopDetails}
-                          </pre>
-                        </div>
+                  <div className="space-y-3 max-h-64 overflow-y-auto border rounded-lg p-4">
+                    {availableMaterials.length === 0 ? (
+                      <div className="text-sm text-yellow-700 bg-yellow-50 p-4 rounded">
+                        No materials found for {selectedFlooringProductLabel}.
                       </div>
+                    ) : (
+                      availableMaterials.map((mat) => {
+                        const isSelected = selectedMaterials.some((m) => m.materialId === mat.id);
+                        const currentSelection = selectedMaterials.find((m) => m.materialId === mat.id);
+                        const variants = storeMaterials
+                          .filter(
+                            (m) =>
+                              normText(m.product) === normText(mat.product) &&
+                              normText(m.name) === normText(mat.name),
+                          )
+                          .map((m) => ({
+                            id: m.id,
+                            brand: getBrandOfMaterial(m),
+                            shopId: m.shopId,
+                            rate: m.rate,
+                            shopName: storeShops.find((s) => s.id === m.shopId)?.name || "Unknown",
+                          }));
+                        const availableBrands = Array.from(new Set(variants.map((v) => v.brand))).sort();
+                        const selectedBrand =
+                          currentSelection?.selectedBrand || availableBrands[0] || "Generic";
+                        const brandShops = variants
+                          .filter((v) => v.brand === selectedBrand)
+                          .sort((a, b) => (a.rate || 0) - (b.rate || 0));
 
-                      <div style={{ width: "40%", lineHeight: 1.6, textAlign: "right" }}>
-                        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>FINAL BOQ</div>
-                        <div><strong>Bill No</strong> : {finalBillNo}</div>
-                        <div><strong>Bill Date</strong> : {finalBillDate}</div>
-                        <div><strong>Due Date</strong> : {finalDueDate}</div>
-                        <div style={{ marginTop: 6 }}>
-                          <strong>Terms</strong> : {finalTerms}
-                        </div>
-                        <div style={{ marginTop: 6 }}>
-                          <strong>Customer</strong> : {finalCustomerName || "Customer"}
-                        </div>
+                        return (
+                          <div
+                            key={mat.id}
+                            className="border rounded-lg p-3 hover:bg-muted/50 transition"
+                          >
+                            <div className="flex items-start gap-3">
+                              <Checkbox
+                                id={mat.id}
+                                checked={isSelected}
+                                onCheckedChange={() => handleToggleMaterial(mat.id)}
+                              />
+                              <div className="flex-1">
+                                <label htmlFor={mat.id} className="font-medium cursor-pointer">
+                                  {mat.name}
+                                </label>
+                                <p className="text-xs text-muted-foreground">{mat.code}</p>
+
+                                {isSelected && availableBrands.length > 0 && (
+                                  <div className="mt-3 space-y-2">
+                                    <Label className="text-xs">Select Brand:</Label>
+                                    <Select
+                                      value={selectedBrand}
+                                      onValueChange={(newBrand) => handleChangeBrand(mat.id, newBrand)}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {availableBrands.map((b) => (
+                                          <SelectItem key={b} value={b}>
+                                            {b}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+
+                                {isSelected && brandShops.length > 0 && (
+                                  <div className="mt-3 space-y-2">
+                                    <Label className="text-xs">Select Shop:</Label>
+                                    <Select
+                                      value={currentSelection?.selectedShopId || brandShops[0]?.shopId || ""}
+                                      onValueChange={(newShopId) => handleChangeShop(mat.id, newShopId)}
+                                    >
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {brandShops.map((shop) => (
+                                          <SelectItem key={shop.shopId} value={shop.shopId || ""}>
+                                            {shop.shopName} - ₹{shop.rate}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(1)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button disabled={selectedMaterials.length === 0} onClick={() => setStep(3)}>
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 3: Project Dimensions */}
+              {step === 3 && (
+                <motion.div
+                  key="step3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">Project Area</Label>
+
+                  <div className="space-y-4">
+                    <div>
+                      <Label>Area Name</Label>
+                      <Input
+                        placeholder="e.g., Living Room"
+                        value={areaName}
+                        onChange={(e) => setAreaName(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Length (ft)</Label>
+                        <Input
+                          type="number"
+                          value={length}
+                          onChange={(e) => setLength(Number(e.target.value))}
+                        />
+                      </div>
+                      <div>
+                        <Label>Width (ft)</Label>
+                        <Input
+                          type="number"
+                          value={width}
+                          onChange={(e) => setWidth(Number(e.target.value))}
+                        />
                       </div>
                     </div>
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded">
+                      <p className="text-sm">
+                        <strong>Calculated Area:</strong> {(length * width).toFixed(2)} sqft
+                        (with 10% wastage: {calculateQty()} sqft)
+                      </p>
+                    </div>
+                  </div>
 
-                    <div style={{ marginTop: 16, border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <thead style={{ background: '#f8fafc' }}>
-                          <tr>
-                            {['S.No', 'Item', 'Description', 'Unit', 'Qty', 'Rate (₹)', 'Supplier', 'Amount (₹)'].map(h => (
-                              <th key={h} style={{ textAlign: h === 'Qty' || h.includes('Rate') || h.includes('Amount') ? 'right' : 'left', padding: 10, borderBottom: '1px solid #e6e6e6', fontSize: 12 }}>{h}</th>
-                            ))}
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(2)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={() => setStep(4)}>
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 4: BOQ Preview & Generate */}
+              {step === 4 && (
+                <motion.div
+                  key="step4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">BOQ Summary</Label>
+
+                  {displayMaterials.length === 0 ? (
+                    <div className="text-yellow-700 bg-yellow-50 p-4 rounded">
+                      No materials selected.
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg p-4 space-y-4">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left">Material</th>
+                            <th className="text-right">Qty</th>
+                            <th className="text-right">Unit</th>
+                            <th className="text-right">Rate</th>
+                            <th className="text-right">Total</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {getMaterialsWithDetails().map((m, i) => (
-                            <tr key={m.id}>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9', width: 40 }}>{i + 1}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9' }}>{m.name}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9' }}>{m.id ? (materialDescriptions[m.id] || m.name) : m.name}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9', width: 80 }}>{m.unit || 'sqft'}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9', textAlign: 'right', width: 80 }}>{m.quantity}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9', textAlign: 'right', width: 100 }}>{(Number(m.rate) || 0).toFixed(2)}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9' }}>{m.shopName}</td>
-                              <td style={{ padding: 10, borderBottom: '1px solid #f1f5f9', textAlign: 'right', width: 120 }}>{(m.quantity * (Number(m.rate) || 0)).toFixed(2)}</td>
+                          {displayMaterials.map((m) => (
+                            <tr key={m.id} className="border-b">
+                              <td>{m.name}</td>
+                              <td className="text-right">{m.quantity}</td>
+                              <td className="text-right">{m.unit}</td>
+                              <td className="text-right">₹{m.rate.toFixed(2)}</td>
+                              <td className="text-right">₹{(m.quantity * m.rate).toFixed(2)}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
-                    </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                      <table style={{ width: 300 }}>
-                        <tbody>
-                          <tr><td>Sub Total</td><td style={{ textAlign: "right" }}>{subTotal.toFixed(2)}</td></tr>
-                          <tr><td>SGST 9%</td><td style={{ textAlign: "right" }}>{sgst.toFixed(2)}</td></tr>
-                          <tr><td>CGST 9%</td><td style={{ textAlign: "right" }}>{cgst.toFixed(2)}</td></tr>
-                          <tr><td>Round Off</td><td style={{ textAlign: "right" }}>{roundOff.toFixed(2)}</td></tr>
-                          <tr><td><strong>Total</strong></td><td style={{ textAlign: "right" }}><strong>₹{grandTotal.toFixed(2)}</strong></td></tr>
-                        </tbody>
-                      </table>
+                      <div className="border-t pt-4 space-y-2">
+                        <div className="flex justify-between font-semibold">
+                          <span>Subtotal:</span>
+                          <span>₹{subTotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>SGST (9%):</span>
+                          <span>₹{sgst.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>CGST (9%):</span>
+                          <span>₹{cgst.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-2 font-bold">
+                          <span>Grand Total:</span>
+                          <span>₹{grandTotal.toFixed(2)}</span>
+                        </div>
+                      </div>
                     </div>
+                  )}
 
-                    {/* SIGNATURE */}
-                    <div style={{ marginTop: 50 }}>
-                      <div style={{ width: 200, borderTop: "1px solid #000" }} />
-                      <div>Authorized Signature</div>
-                    </div>
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(3)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={() => setStep(5)}>
+                      Continue <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
                   </div>
-
-                  <div className="flex justify-end gap-2"><Button onClick={() => setStep(4)} variant="outline">Back</Button><Button onClick={handleExportPDF}>Export Final PDF</Button></div>
                 </motion.div>
               )}
 
+              {/* STEPS 5-10 Placeholder */}
+              {[5, 6, 7, 8, 9, 10].includes(step) && (
+                <motion.div
+                  key={`step${step}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">Step {step}</Label>
+                  <p className="text-muted-foreground">Step {step} content coming soon...</p>
+
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(step - 1)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={() => setStep(step + 1)}>
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 11: Final BOQ */}
+              {step === 11 && (
+                <motion.div
+                  key="step11"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">Final BOQ</Label>
+
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Bill No</Label>
+                        <Input
+                          value={finalBillNo}
+                          onChange={(e) => setFinalBillNo(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Bill Date</Label>
+                        <Input
+                          type="date"
+                          value={finalBillDate}
+                          onChange={(e) => setFinalBillDate(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Customer Name</Label>
+                        <Input
+                          value={finalCustomerName}
+                          onChange={(e) => setFinalCustomerName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label>Customer Address</Label>
+                        <Input
+                          value={finalCustomerAddress}
+                          onChange={(e) => setFinalCustomerAddress(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(10)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={handleSaveStep4} disabled={savingStep4}>
+                      {savingStep4 ? "Saving..." : "Save BOQ"}
+                    </Button>
+                    <Button onClick={() => setStep(12)}>
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* STEP 12: QA & Review */}
+              {step === 12 && (
+                <motion.div
+                  key="step12"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-4"
+                >
+                  <Label className="text-lg font-semibold">QA & Review</Label>
+                  <p className="text-muted-foreground">Review and finalize your flooring BOQ.</p>
+
+                  <div className="flex justify-between gap-2 pt-6">
+                    <Button variant="outline" onClick={() => setStep(11)}>
+                      <ChevronLeft className="mr-2 h-4 w-4" /> Back
+                    </Button>
+                    <Button onClick={handleExportPDF}>
+                      <Download className="mr-2 h-4 w-4" /> Export PDF
+                    </Button>
+                  </div>
+                </motion.div>
+              )}
             </AnimatePresence>
           </CardContent>
         </Card>

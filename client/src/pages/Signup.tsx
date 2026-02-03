@@ -1,151 +1,338 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Building2, User, ChevronRight, CheckCircle2 } from "lucide-react";
-import { useData } from "@/lib/store";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Building2, Users, Settings, ShoppingCart, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useToast } from "@/hooks/use-toast";
+
+/* =========================
+   ROLE DEFINITIONS
+========================= */
+type UserRole =
+  | "admin"
+  | "software_team"
+  | "purchase_team"
+  | "user_client"
+  | "supplier";
 
 export default function Signup() {
   const [, setLocation] = useLocation();
-  const { login: localLogin } = useData();
   const { signup } = useAuth();
-  const [step, setStep] = useState(1);
-  const [userType, setUserType] = useState<"client" | "supplier">("client");
-  
-  // Form State
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+
   const [formData, setFormData] = useState({
-    name: "",
+    fullName: "",
     email: "",
-    phone: "",
+    mobileNumber: "",
+    password: "",
+    confirmPassword: "",
+
     companyName: "",
-    gst: "",
-    address: "",
-    description: ""
+    gstNumber: "",
+    businessAddress: "",
+
+    department: "",
+    employeeCode: "",
   });
 
-  const handleNext = () => setStep(2);
+  const [confirmInfo, setConfirmInfo] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Call server signup to create token, and also set local app user
-    signup(formData.email, 'password123', userType === 'client' ? 'user' : 'supplier').catch(() => {});
-    localLogin({
-      id: Math.random().toString(),
-      name: formData.name,
-      email: formData.email,
-      role: userType === 'client' ? 'user' : 'supplier'
-    });
-    setLocation("/dashboard");
+  /* =========================
+     ROLES LIST
+  ========================= */
+  const roles = [
+    {
+      value: "admin",
+      label: "Admin",
+      icon: Settings,
+      description: "Full system access",
+    },
+    {
+      value: "software_team",
+      label: "Software Team",
+      icon: Users,
+      description: "Technical management",
+    },
+    {
+      value: "purchase_team",
+      label: "Purchase Team",
+      icon: ShoppingCart,
+      description: "Procurement management",
+    },
+    {
+      value: "user_client",
+      label: "User / Client",
+      icon: User,
+      description: "General system access",
+    },
+    {
+      value: "supplier",
+      label: "Supplier",
+      icon: Building2,
+      description: "Material supplier",
+    },
+  ];
+
+  /* =========================
+     VALIDATION
+  ========================= */
+  const validateForm = () => {
+    if (!selectedRole) {
+      toast({
+        title: "Error",
+        description: "Please select a role",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (
+      !formData.fullName.trim() ||
+      !formData.email.trim() ||
+      !formData.mobileNumber.trim()
+    ) {
+      toast({
+        title: "Error",
+        description: "All basic fields are required",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!formData.password || formData.password !== formData.confirmPassword) {
+      toast({
+        title: "Error",
+        description: "Passwords do not match",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (selectedRole === "supplier") {
+      if (
+        !formData.companyName ||
+        !formData.gstNumber ||
+        !formData.businessAddress
+      ) {
+        toast({
+          title: "Error",
+          description: "Supplier details are required",
+          variant: "destructive",
+        });
+        return false;
+      }
+    }
+
+    if (!confirmInfo) {
+      toast({
+        title: "Error",
+        description: "Please confirm the information",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
   };
 
+  /* =========================
+     SUBMIT HANDLER
+  ========================= */
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    setIsLoading(true);
+    try {
+      await signup(formData.email, formData.password, selectedRole);
+
+      // ✅ Supplier: go to separate pending approval page
+      if (selectedRole === "supplier") {
+        toast({
+          title: "Request Submitted",
+          description: "Your supplier account is waiting for admin approval.",
+        });
+
+        setLocation("/pending-approval");
+        return;
+      }
+
+      // ✅ Other roles: normal behavior
+      toast({
+        title: "Account Created",
+        description: "Please login using your email and password",
+      });
+
+      // ✅ REDIRECT TO LOGIN PAGE
+      setLocation("/");
+    } catch {
+      toast({
+        title: "Error",
+        description: "Create account failed",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /* =========================
+     UI
+  ========================= */
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg">
-        <Card className="border-2 shadow-xl">
-          <CardHeader className="text-center">
-            <CardTitle className="text-3xl font-heading">Create Account</CardTitle>
-            <CardDescription>Join BuildEstimate Pro today</CardDescription>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-2xl"
+      >
+        <Card className="border-2 border-gray-200 shadow-2xl bg-white">
+          <CardHeader className="text-center pb-6 border-b">
+            <CardTitle className="text-3xl font-bold">
+              Create Your Account
+            </CardTitle>
+            <CardDescription>
+              Register to access the BOQ Management System
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <AnimatePresence mode="wait">
-              {step === 1 ? (
-                <motion.div 
-                  key="step1"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="space-y-6"
-                >
-                  <Label className="text-lg">I am a...</Label>
-                  <RadioGroup value={userType} onValueChange={(v: any) => setUserType(v)} className="grid grid-cols-2 gap-4">
-                    <div>
-                      <RadioGroupItem value="client" id="client" className="peer sr-only" />
-                      <Label
-                        htmlFor="client"
-                        className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer h-32 justify-center gap-2 transition-all"
-                      >
-                        <User className="h-8 w-8" />
-                        Client / User
-                      </Label>
-                    </div>
-                    <div>
-                      <RadioGroupItem value="supplier" id="supplier" className="peer sr-only" />
-                      <Label
-                        htmlFor="supplier"
-                        className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer h-32 justify-center gap-2 transition-all"
-                      >
-                        <Building2 className="h-8 w-8" />
-                        Supplier
-                      </Label>
-                    </div>
-                  </RadioGroup>
 
-                  <Button onClick={handleNext} className="w-full h-12 text-lg">
-                    Continue <ChevronRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="step2"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                >
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Full Name</Label>
-                        <Input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+          <CardContent className="pt-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* ROLE SELECTION */}
+              <RadioGroup
+                value={selectedRole || ""}
+                onValueChange={(value) => setSelectedRole(value as UserRole)}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
+                {roles.map((role) => (
+                  <div key={role.value}>
+                    <RadioGroupItem
+                      value={role.value}
+                      id={role.value}
+                      className="peer sr-only"
+                    />
+                    <Label
+                      htmlFor={role.value}
+                      className="flex flex-col items-center justify-center rounded-lg border-2 p-4 cursor-pointer peer-data-[state=checked]:border-blue-500"
+                    >
+                      <role.icon className="h-6 w-6 mb-2" />
+                      <div className="font-medium">{role.label}</div>
+                      <div className="text-xs text-gray-500">
+                        {role.description}
                       </div>
-                      <div className="space-y-2">
-                        <Label>Phone</Label>
-                        <Input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>Email Address</Label>
-                      <Input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
-                    </div>
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
 
-                    {userType === 'supplier' && (
-                      <>
-                        <div className="space-y-2">
-                          <Label>Company / Shop Name</Label>
-                          <Input required value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>GST Number</Label>
-                          <Input value={formData.gst} onChange={e => setFormData({...formData, gst: e.target.value})} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Shop Address</Label>
-                          <Textarea value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} />
-                        </div>
-                      </>
-                    )}
+              {/* COMMON FIELDS */}
+              <Input
+                placeholder="Full Name"
+                value={formData.fullName}
+                onChange={(e) =>
+                  setFormData({ ...formData, fullName: e.target.value })
+                }
+              />
+              <Input
+                placeholder="Mobile Number"
+                value={formData.mobileNumber}
+                onChange={(e) =>
+                  setFormData({ ...formData, mobileNumber: e.target.value })
+                }
+              />
+              <Input
+                type="email"
+                placeholder="Email"
+                value={formData.email}
+                onChange={(e) =>
+                  setFormData({ ...formData, email: e.target.value })
+                }
+              />
+              <Input
+                type="password"
+                placeholder="Password"
+                value={formData.password}
+                onChange={(e) =>
+                  setFormData({ ...formData, password: e.target.value })
+                }
+              />
+              <Input
+                type="password"
+                placeholder="Confirm Password"
+                value={formData.confirmPassword}
+                onChange={(e) =>
+                  setFormData({ ...formData, confirmPassword: e.target.value })
+                }
+              />
 
-                    <Button type="submit" className="w-full h-12 text-lg mt-6">
-                      <CheckCircle2 className="mr-2 h-5 w-5" /> Complete Signup
-                    </Button>
-                  </form>
-                </motion.div>
+              {/* SUPPLIER ONLY */}
+              {selectedRole === "supplier" && (
+                <>
+                  <Input
+                    placeholder="Company Name"
+                    value={formData.companyName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, companyName: e.target.value })
+                    }
+                  />
+                  <Input
+                    placeholder="GST Number"
+                    value={formData.gstNumber}
+                    onChange={(e) =>
+                      setFormData({ ...formData, gstNumber: e.target.value })
+                    }
+                  />
+                  <Textarea
+                    placeholder="Business Address"
+                    value={formData.businessAddress}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        businessAddress: e.target.value,
+                      })
+                    }
+                  />
+                </>
               )}
-            </AnimatePresence>
+
+              {/* CONFIRM */}
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={confirmInfo}
+                  onCheckedChange={(checked) =>
+                    setConfirmInfo(checked === true)
+                  }
+                />
+                <Label>I confirm the above information is correct</Label>
+              </div>
+
+              <Button type="submit" disabled={isLoading} className="w-full">
+                {isLoading ? "Creating..." : "Create Account"}
+              </Button>
+            </form>
           </CardContent>
-          <CardFooter className="justify-center border-t pt-6">
-             <div className="text-center text-sm">
-              Already have an account?{" "}
-              <Link href="/" className="text-primary hover:underline font-medium">
-                Log in
-              </Link>
-            </div>
+
+          <CardFooter className="justify-center">
+            <Link href="/" className="text-blue-600 hover:underline">
+              Already have an account? Login
+            </Link>
           </CardFooter>
         </Card>
       </motion.div>

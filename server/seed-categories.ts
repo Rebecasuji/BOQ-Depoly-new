@@ -3,7 +3,7 @@ import { query } from './db/client';
 export async function seedMaterialCategories(): Promise<void> {
   try {
     console.log('[seed-categories] Creating material_categories table if not exists...');
-    
+
     await query(`
       CREATE TABLE IF NOT EXISTS material_categories (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -12,11 +12,11 @@ export async function seedMaterialCategories(): Promise<void> {
         created_by VARCHAR(255)
       )
     `);
-    
+
     console.log('[seed-categories] ✓ material_categories table ready');
 
     console.log('[seed-categories] Creating material_subcategories table if not exists...');
-    
+
     await query(`
       CREATE TABLE IF NOT EXISTS material_subcategories (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -27,10 +27,103 @@ export async function seedMaterialCategories(): Promise<void> {
         UNIQUE(name, category)
       )
     `);
-    
-    console.log('[seed-categories] ✓ material_subcategories table ready');
-  } catch (err: any) {
-    console.error('[seed-categories] Error creating category tables:', err.message || err);
-    // Don't throw - this is non-critical
+
+    console.log('[seed-categories] Migrating products table...');
+
+    // Check if products table has the old schema and migrate it
+    try {
+      const result = await query(`
+        SELECT column_name, is_nullable, data_type
+        FROM information_schema.columns
+        WHERE table_name = 'products' AND table_schema = 'public'
+        ORDER BY ordinal_position
+      `);
+
+      const hasCodeColumn = result.rows.some((row: any) => row.column_name === 'code');
+      const hasDescriptionColumn = result.rows.some((row: any) => row.column_name === 'description');
+
+      if (hasCodeColumn || hasDescriptionColumn) {
+        console.log('[seed-categories] Products table has old schema, migrating...');
+
+        // Rename old table
+        await query('ALTER TABLE products RENAME TO products_old');
+
+        // Create new table with simplified schema
+        await query(`
+          CREATE TABLE products (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name VARCHAR(255) UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by VARCHAR(255)
+          )
+        `);
+
+        // Copy data from old table (only name and created_by if they exist)
+        try {
+          await query(`
+            INSERT INTO products (name, created_at, created_by)
+            SELECT DISTINCT name, created_at, created_by
+            FROM products_old
+            WHERE name IS NOT NULL
+          `);
+        } catch (copyErr) {
+          console.warn('[seed-categories] Could not copy data from old table:', copyErr);
+        }
+
+        // Drop old table
+        await query('DROP TABLE products_old CASCADE');
+
+        console.log('[seed-categories] ✓ Products table migrated successfully');
+      } else {
+        console.log('[seed-categories] Products table already has correct schema');
+      }
+    } catch (checkErr) {
+      console.log('[seed-categories] Products table does not exist, creating new one...');
+    }
+
+    // Create products table if it doesn't exist
+    await query(`
+      CREATE TABLE IF NOT EXISTS products (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) UNIQUE NOT NULL,
+        subcategory TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by VARCHAR(255)
+      )
+    `);
+
+    // Add subcategory column if it doesn't exist (for existing tables)
+    await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory TEXT NOT NULL`);
+
+    console.log('[seed-categories] ✓ products table ready');
+
+    // Create materials table if it doesn't exist
+    await query(`
+      CREATE TABLE IF NOT EXISTS materials (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL,
+        code VARCHAR(255),
+        rate DECIMAL(10,2),
+        shop_id UUID,
+        unit VARCHAR(50),
+        category VARCHAR(255),
+        brandname VARCHAR(255),
+        modelnumber VARCHAR(255),
+        subcategory VARCHAR(255),
+        product VARCHAR(255),
+        technicalspecification TEXT,
+        image VARCHAR(500),
+        attributes JSONB,
+        master_material_id UUID,
+        template_id UUID,
+        approved BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log('[seed-categories] ✓ materials table ready');
+  } catch (error) {
+    console.error('[seed-categories] Error seeding categories:', error);
+    throw error;
   }
 }

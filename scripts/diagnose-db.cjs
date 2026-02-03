@@ -8,13 +8,18 @@ const path = require('path');
 const envPath = path.join(__dirname, '..', '.env');
 const envContent = fs.readFileSync(envPath, 'utf-8');
 const envMatch = envContent.match(/DATABASE_URL="([^"]+)"/);
-const connectionString = envMatch ? envMatch[1] : "postgres://boq_admin:boq_admin_pass@localhost:5432/boq";
+const connectionString = envMatch ? envMatch[1] : process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('No DATABASE_URL found in .env or environment variables');
+  process.exit(1);
+}
 
 const pool = new pg.Pool({ connectionString });
 
 (async () => {
   try {
-    console.log('Attempting to connect to:', connectionString.split('@')[1] || 'localhost');
+    console.log('Attempting to connect to:', connectionString.split('@')[1] || 'database');
     
     // Test connection
     const conn = await pool.connect();

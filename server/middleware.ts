@@ -18,23 +18,36 @@ export function authMiddleware(
   res: Response,
   next: NextFunction
 ): void {
-  const authHeader = req.headers.authorization;
-  console.log('[authMiddleware] authorization header:', authHeader);
+  const authHeader =
+    (req.headers.authorization as string | undefined) ||
+    ((req.headers as any).Authorization as string | undefined);
+
+  console.log("[authMiddleware] authorization header:", authHeader);
+
   const token = extractTokenFromHeader(authHeader);
 
   if (!token) {
-    console.log('[authMiddleware] no token provided');
+    console.log("[authMiddleware] no token provided");
     res.status(401).json({ message: "Unauthorized: No token provided" });
     return;
   }
 
   const decoded = verifyToken(token);
   if (!decoded) {
-    console.log('[authMiddleware] token verification failed for token:', token.substring(0, 20) + '...');
+    console.log(
+      "[authMiddleware] token verification failed for token:",
+      token.substring(0, 20) + "..."
+    );
     res.status(401).json({ message: "Unauthorized: Invalid token" });
     return;
   }
-  console.log('[authMiddleware] token verified for user:', decoded.username, 'role:', decoded.role);
+
+  console.log(
+    "[authMiddleware] token verified for user:",
+    decoded.username,
+    "role:",
+    decoded.role
+  );
 
   req.user = {
     id: decoded.id,
@@ -51,6 +64,15 @@ export function requireRole(...roles: string[]) {
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
+
+    console.log(
+      "[requireRole] checking user role:",
+      req.user.role,
+      "allowed roles:",
+      roles,
+      "includes?",
+      roles.includes(req.user.role)
+    );
 
     if (!roles.includes(req.user.role)) {
       res.status(403).json({ message: "Forbidden: Insufficient permissions" });

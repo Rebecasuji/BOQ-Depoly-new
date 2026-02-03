@@ -14,10 +14,10 @@ import {
   Video,
   LifeBuoy,
   Menu,
-  X
+  X,
 } from "lucide-react";
 import { useState, useMemo } from "react";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -25,61 +25,103 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [estSearch, setEstSearch] = useState("");
 
+  // ✅ Type-safe fallbacks (NO change to UI structure)
+  const displayEmail = user?.username || "";
+  const displayName =
+    user?.username?.split("@")?.[0] || user?.username || "User";
+
   // Define navigation items based on role
   const getNavItems = () => {
     const items = [
       // Estimator - User (Client) & Admin
-      { 
-        label: "Estimator", 
-        href: "/estimator", 
+      {
+        label: "Estimator",
+        href: "/estimator",
         icon: Calculator,
-        roles: ["admin", "user", "software_team"] 
+        roles: ["admin", "user", "software_team"],
       },
       // Admin Dashboard shortcuts (open AdminDashboard tabs)
-      { label: "Manage Materials", href: "/admin/dashboard?tab=materials", roles: ["admin","software_team","purchase_team"] },
-      { label: "Categories", href: "/admin/dashboard?tab=categories", roles: ["admin","software_team","purchase_team"] },
-      { label: "Manage Shops", href: "/admin/dashboard?tab=shops", roles: ["admin","software_team","supplier","purchase_team"] },
-      { label: "Approvals", href: "/admin/dashboard?tab=approvals", roles: ["admin","software_team","purchase_team"] },
-      { label: "Material Approvals", href: "/admin/dashboard?tab=material-approvals", roles: ["admin","software_team","purchase_team"] },
-      { label: "Messages", href: "/admin/dashboard?tab=messages", roles: ["admin","software_team","purchase_team"] },
+      {
+        label: "Item Master",
+        href: "/admin/dashboard?tab=materials",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+      {
+        label: "Categories",
+        href: "/admin/dashboard?tab=categories",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+      {
+        label: "Manage Shops",
+        href: "/admin/dashboard?tab=shops",
+        roles: ["admin", "software_team", "supplier", "purchase_team"],
+      },
+      {
+        label: "Approvals",
+        href: "/admin/dashboard?tab=approvals",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+
+      // ✅ Supplier Approvals (Admin only is better, but keeping your roles list)
+      {
+        label: "Supplier Approvals",
+        href: "/admin/suppliers",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+
+      {
+        label: "Material Approvals",
+        href: "/admin/dashboard?tab=material-approvals",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+      {
+        label: "Messages",
+        href: "/admin/dashboard?tab=messages",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+
       // Orders/Purchases
-      { 
-        label: "Orders", 
-        href: "/orders", 
+      {
+        label: "Orders",
+        href: "/orders",
         icon: ShoppingCart,
-        roles: ["admin", "purchase_team", "software_team"] 
+        roles: ["admin", "purchase_team", "software_team"],
       },
+
       // Users/Clients - Admin & Software
-      { 
-        label: "Users", 
-        href: "/users", 
+      {
+        label: "Users",
+        href: "/users",
         icon: Users,
-        roles: ["admin", "software_team"] 
+        roles: ["admin", "software_team"],
       },
+
       // Demo Videos - All
-      { 
-        label: "Demos & Help", 
-        href: "/demos", 
+      {
+        label: "Demos & Help",
+        href: "/demos",
         icon: Video,
-        roles: ["admin", "supplier", "user", "purchase_team", "software_team"] 
+        roles: ["admin", "supplier", "user", "purchase_team", "software_team"],
       },
-       // Support - Supplier
-       { 
-        label: "Tech Support", 
-        href: "/support", 
+
+      // Support - Supplier
+      {
+        label: "Tech Support",
+        href: "/support",
         icon: LifeBuoy,
-        roles: ["supplier"] 
+        roles: ["supplier"],
       },
+
       // Settings - Admin & Software
-      { 
-        label: "Settings", 
-        href: "/settings", 
+      {
+        label: "Settings",
+        href: "/settings",
         icon: Settings,
-        roles: ["admin", "software_team"] 
+        roles: ["admin", "software_team"],
       },
     ];
 
-    return items.filter(item => user?.role && item.roles.includes(user.role));
+    return items.filter((item) => user?.role && item.roles.includes(user.role));
   };
 
   const navItems = getNavItems();
@@ -111,7 +153,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           WallBuilder
         </h1>
         <p className="text-xs text-sidebar-foreground/60 mt-1 pl-1">
-          {user?.role ? user.role.replace("_", " ").toUpperCase() : "GUEST"} PORTAL
+          {user?.role ? user.role.replace("_", " ").toUpperCase() : "GUEST"}{" "}
+          PORTAL
         </p>
       </div>
 
@@ -135,7 +178,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
             {filteredEstimators.length === 0 && (
-              <div className="text-xs text-sidebar-foreground/60">No estimators</div>
+              <div className="text-xs text-sidebar-foreground/60">
+                No estimators
+              </div>
             )}
           </div>
         </div>
@@ -155,7 +200,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 )}
                 onClick={() => setIsMobileOpen(false)}
               >
-                {/* no icon on custom admin links to keep compact */}
                 {item.label}
               </Link>
             );
@@ -166,15 +210,20 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className="p-4 border-t border-sidebar-border bg-sidebar-accent/20">
         <div className="flex items-center gap-3 mb-4 px-2">
           <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center border border-sidebar-border">
-            <span className="text-sm font-bold">{user?.name?.charAt(0)}</span>
+            {/* ✅ changed from user?.name to derived displayName */}
+            <span className="text-sm font-bold">{displayName.charAt(0)}</span>
           </div>
           <div className="overflow-hidden">
-            <p className="text-sm font-medium truncate">{user?.name}</p>
-            <p className="text-xs text-sidebar-foreground/60 truncate">{user?.email}</p>
+            {/* ✅ changed from user?.name */}
+            <p className="text-sm font-medium truncate">{displayName}</p>
+            {/* ✅ changed from user?.email */}
+            <p className="text-xs text-sidebar-foreground/60 truncate">
+              {displayEmail}
+            </p>
           </div>
         </div>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           className="w-full justify-start gap-2 border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground bg-transparent"
           onClick={logout}
         >
@@ -212,7 +261,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </div>
             WallBuilder
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setIsMobileOpen(true)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsMobileOpen(true)}
+          >
             <Menu className="w-5 h-5" />
           </Button>
         </header>

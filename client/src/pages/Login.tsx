@@ -3,109 +3,188 @@ import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Lock, User, Hammer, Building2 } from "lucide-react";
-import { useData, Role } from "@/lib/store";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
+import { Building2 } from "lucide-react";
+import { useData } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
   const [, setLocation] = useLocation();
-  const { login: localLogin } = useData();
+  const { login: setLocalUser } = useData();
   const { login } = useAuth();
+  const { toast } = useToast();
+
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("user");
+  const [password, setPassword] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  /* =========================
+     SUBMIT HANDLER
+  ========================= */
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      // use server auth to get token + user
-      login(email, 'password123', role).catch(() => {});
-      // also set local app user for UI state
-      localLogin({
-        id: "1",
-        name: email.split("@")[0] || "User",
-        email: email,
-        role: role,
-        shopId: role === 'supplier' ? '1' : undefined
+
+    try {
+      /**
+       * 🔐 BACKEND LOGIN
+       */
+      const { user, token } = await login(email, password);
+
+      /**
+       * ✅ SET LOCAL USER STATE
+       */
+      setLocalUser({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        shopId: user.role === "supplier" ? user.shopId : undefined,
       });
+
+      /**
+       * ✅ ROLE-BASED REDIRECTION
+       */
+      switch (user.role) {
+        case "admin":
+          setLocation("/admin/dashboard");
+          break;
+        case "software_team":
+          setLocation("/software/dashboard");
+          break;
+        case "purchase_team":
+          setLocation("/purchase/dashboard");
+          break;
+        case "supplier":
+          setLocation("/supplier/dashboard");
+          break;
+        default:
+          setLocation("/dashboard");
+      }
+    } catch (err: any) {
+      const msg =
+        err?.message || "Invalid email or password. Account must exist.";
+
+      // ✅ If supplier is pending/rejected -> go to supplier pending page
+      const lower = String(msg).toLowerCase();
+      if (
+        lower.includes("under review") ||
+        lower.includes("wait for approval") ||
+        lower.includes("rejected")
+      ) {
+        setLocation("/supplier-pending"); // ✅ FIXED ROUTE
+        setIsLoading(false);
+        return;
+      }
+
+      /**
+       * ❌ NORMAL LOGIN FAILED TOAST
+       */
+      toast({
+        title: "Login Failed",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-      setLocation("/dashboard");
-    }, 800);
+    }
   };
 
+  /* =========================
+     UI
+  ========================= */
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sidebar via-background to-primary/20 flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-secondary/10 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-100 rounded-full blur-3xl" />
+      <div className="absolute bottom-0 left-0 w-96 h-96 bg-gray-100 rounded-full blur-3xl" />
 
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-md relative z-10">
-        <Card className="border-2 border-border shadow-2xl">
-          <CardHeader className="space-y-2 pb-6 border-b">
-            <div className="flex items-center justify-center mb-2">
-              <div className="w-12 h-12 rounded-lg bg-primary flex items-center justify-center text-primary-foreground">
-                <Hammer className="h-6 w-6" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="w-full max-w-md relative z-10"
+      >
+        <Card className="border-2 border-gray-200 shadow-2xl bg-white">
+          <CardHeader className="space-y-2 pb-6 border-b border-gray-100">
+            <div className="flex items-center justify-center mb-4">
+              <div className="w-12 h-12 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+                <Building2 className="h-6 w-6" />
               </div>
             </div>
-            <CardTitle className="text-center text-2xl font-heading">BuildEstimate Pro</CardTitle>
-            <CardDescription className="text-center">Construction & Interior Estimator</CardDescription>
+            <CardTitle className="text-center text-2xl font-bold text-gray-900">
+              BOQ Management System
+            </CardTitle>
+            <CardDescription className="text-center text-gray-600">
+              Login to access your dashboard
+            </CardDescription>
           </CardHeader>
+
           <CardContent className="pt-6">
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
-                <Label>Select Role</Label>
-                <Select value={role} onValueChange={(v: Role) => setRole(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="user">User / Client</SelectItem>
-                    <SelectItem value="supplier">Supplier</SelectItem>
-                    <SelectItem value="purchase_team">Purchase Team</SelectItem>
-                    <SelectItem value="software_team">Software Team</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <User className="h-4 w-4" /> Email
+                <Label className="text-sm font-medium text-gray-700">
+                  Email Address
                 </Label>
-                <Input 
-                  type="email" 
-                  placeholder="name@example.com" 
+                <Input
+                  type="email"
+                  placeholder="name@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  className="h-11"
                 />
               </div>
+
               <div className="space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Lock className="h-4 w-4" /> Password
+                <Label className="text-sm font-medium text-gray-700">
+                  Password
                 </Label>
-                <Input type="password" placeholder="••••••••" defaultValue="password123" />
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="h-11"
+                />
               </div>
-              <Button type="submit" className="w-full h-11 text-base font-semibold" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Sign In"}
+
+              <Button
+                type="submit"
+                className="w-full h-11 text-base font-semibold bg-blue-600 hover:bg-blue-700"
+                disabled={isLoading}
+              >
+                {isLoading ? "Logging in..." : "Login"}
               </Button>
             </form>
           </CardContent>
-          <CardFooter className="flex flex-col gap-4 border-t pt-6 bg-muted/20">
-            <div className="text-center text-sm">
-              Don't have an account?{" "}
-              <Link href="/signup" className="text-primary hover:underline font-medium">
-                Sign up
+
+          <CardFooter className="flex flex-col gap-4 border-t border-gray-100 pt-6 bg-gray-50/50">
+            <div className="text-center text-sm text-gray-600">
+              <Link
+                href="/forgot-password"
+                className="text-blue-600 hover:underline font-medium"
+              >
+                Forgot Password?
               </Link>
             </div>
-            <p className="text-center text-xs text-muted-foreground">
-              Mockup Mode: Any email/password works
-            </p>
+            <div className="text-center text-sm text-gray-600">
+              Don&apos;t have an account?{" "}
+              <Link
+                href="/signup"
+                className="text-blue-600 hover:underline font-medium"
+              >
+                Sign Up
+              </Link>
+            </div>
           </CardFooter>
         </Card>
       </motion.div>

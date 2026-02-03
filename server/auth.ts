@@ -2,7 +2,8 @@ import jwt from "jsonwebtoken";
 import bcryptjs from "bcryptjs";
 import type { User } from "@shared/schema";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+const JWT_SECRET =
+  process.env.JWT_SECRET || "your-secret-key-change-in-production";
 const JWT_EXPIRES_IN = "7d";
 
 export interface JWTPayload {
@@ -10,6 +11,8 @@ export interface JWTPayload {
   username: string;
   role: string;
 }
+
+/* ================= PASSWORD ================= */
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcryptjs.genSalt(10);
@@ -23,27 +26,45 @@ export async function comparePasswords(
   return bcryptjs.compare(password, hash);
 }
 
+/* ================= JWT ================= */
+
 export function generateToken(user: User & { role?: string }): string {
   const payload: JWTPayload = {
     id: user.id,
     username: user.username,
     role: user.role || "user",
   };
+
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
-    return decoded;
-  } catch (error) {
+    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+  } catch {
     return null;
   }
 }
 
-export function extractTokenFromHeader(authHeader: string | undefined): string | null {
+/* ================= TOKEN EXTRACT ================= */
+/**
+ * Accepts:
+ *  - "Bearer <token>"
+ *  - "bearer <token>"
+ *  - "<token>" (fallback)
+ */
+export function extractTokenFromHeader(
+  authHeader: string | undefined
+): string | null {
   if (!authHeader) return null;
-  const parts = authHeader.split(" ");
-  if (parts.length !== 2 || parts[0] !== "Bearer") return null;
-  return parts[1];
+
+  const header = authHeader.trim();
+
+  // Handle "Bearer <token>" (case-insensitive)
+  if (/^Bearer\s+/i.test(header)) {
+    return header.replace(/^Bearer\s+/i, "").trim();
+  }
+
+  // Fallback: raw token
+  return header;
 }

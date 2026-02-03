@@ -20,8 +20,15 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { useData, Material, Shop, ShopApprovalRequest } from "@/lib/store";
+import { useData, Material, Shop } from "@/lib/store";
 import {
   Plus,
   Trash2,
@@ -129,10 +136,33 @@ export default function AdminDashboard() {
     })();
   }, []);
 
+  // Load products from API on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/products');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.products) setProducts(data.products);
+        }
+      } catch (e) {
+        console.warn('load products failed', e);
+      }
+    })();
+  }, []);
+
   // NEW CATEGORY/SUBCATEGORY INPUT
   const [newCategory, setNewCategory] = useState("");
   const [newSubCategory, setNewSubCategory] = useState("");
   const [selectedCategoryForSubCategory, setSelectedCategoryForSubCategory] = useState("");
+
+  // PRODUCTS STATE
+  const [products, setProducts] = useState<any[]>([]);
+  const [newProduct, setNewProduct] = useState({ name: "", subcategory: "" });
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [searchCategories, setSearchCategories] = useState("");
+  const [searchSubCategories, setSearchSubCategories] = useState("");
+  const [searchProducts, setSearchProducts] = useState("");
 
   // Handle Add Category
   const handleAddCategory = async () => {
@@ -226,6 +256,110 @@ export default function AdminDashboard() {
     return subCategories.filter((sc: any) => sc.category === category);
   };
 
+  // Handle Add Product
+  const handleAddProduct = async () => {
+    if (!newProduct.name.trim()) {
+      toast({
+        title: "Error",
+        description: "Product name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!newProduct.subcategory) {
+      toast({
+        title: "Error",
+        description: "Subcategory is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const res = await postJSON('/products', newProduct);
+      const newProd = res.product || res;
+      setProducts((prev: any[]) => [...prev, newProd]);
+      toast({
+        title: "Success",
+        description: `Product "${newProduct.name}" created`,
+      });
+      setNewProduct({ name: "", subcategory: "" });
+    } catch (err: any) {
+      console.error('add product error', err);
+      toast({
+        title: "Error",
+        description: err?.message || 'Failed to create product',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle Update Product
+  const handleUpdateProduct = async () => {
+    if (!editingProduct?.name?.trim()) {
+      toast({
+        title: "Error",
+        description: "Product name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!editingProduct?.subcategory) {
+      toast({
+        title: "Error",
+        description: "Subcategory is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/products/${editingProduct.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(editingProduct),
+      });
+
+      const updated = await res.json();
+      setProducts((prev: any[]) => prev.map((p: any) => p.id === editingProduct.id ? updated.product || updated : p));
+      toast({
+        title: "Success",
+        description: `Product "${editingProduct.name}" updated`,
+      });
+      setEditingProduct(null);
+    } catch (err: any) {
+      console.error('update product error', err);
+      toast({
+        title: "Error",
+        description: err?.message || 'Failed to update product',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle Delete Product
+  const handleDeleteProduct = async (productId: string) => {
+    if (!window.confirm('Delete this product? This cannot be undone.')) return;
+
+    try {
+      await apiFetch(`/products/${productId}`, { method: 'DELETE' });
+
+      setProducts((prev: any[]) => prev.filter((p: any) => p.id !== productId));
+      toast({
+        title: "Success",
+        description: 'Product deleted',
+      });
+    } catch (err: any) {
+      console.error('delete product error', err);
+      toast({
+        title: "Error",
+        description: err?.message || 'Failed to delete product',
+        variant: "destructive",
+      });
+    }
+  };
+
   // ==== MASTER MATERIALS STATE (created by Admin/Software Team with just name + code) ====
   const [masterMaterials, setMasterMaterials] = useState<any[]>([]);
 
@@ -283,10 +417,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     const loadSupplierSubmissions = async () => {
       try {
-        const token = localStorage.getItem("authToken");
-        const response = await fetch("/api/material-submissions-pending-approval", {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        const response = await apiFetch("/material-submissions-pending-approval");
         if (response.ok) {
           const data = await response.json();
           // Transform the response to match material request format
@@ -460,6 +591,7 @@ export default function AdminDashboard() {
     unit: "pcs",
     category: "",
     subCategory: "",
+    product: "",
     brandName: "",
     modelNumber: "",
     technicalSpecification: "",
@@ -481,10 +613,10 @@ export default function AdminDashboard() {
   };
 
   const handleAddMaterial = () => {
-    if (!newMaterial.name || !newMaterial.rate) {
+    if (!newMaterial.name || !newMaterial.rate || !newMaterial.category || !newMaterial.subCategory || !newMaterial.product) {
       toast({
         title: "Error",
-        description: "Name, Rate, and Unit are required",
+        description: "Name, Rate, Category, Sub Category, and Product are required",
         variant: "destructive",
       });
       return;
@@ -535,6 +667,7 @@ export default function AdminDashboard() {
       unit: "pcs",
       category: "",
       subCategory: "",
+      product: "",
       brandName: "",
       modelNumber: "",
       technicalSpecification: "",
@@ -554,6 +687,7 @@ export default function AdminDashboard() {
       unit: mat.unit,
       category: mat.category || "",
       subCategory: mat.subCategory || "",
+      product: mat.product || "",
       brandName: mat.brandName || "",
       modelNumber: mat.modelNumber || "",
       technicalSpecification: mat.technicalSpecification || "",
@@ -588,7 +722,7 @@ export default function AdminDashboard() {
 
       toast({ title: 'Updated', description: 'Material details updated' });
       setEditingMaterialId(null);
-      setNewMaterial({ name: '', code: '', rate: 0, unit: 'pcs', category: '', subCategory: '', brandName: '', modelNumber: '', technicalSpecification: '', dimensions: '', finish: '', metalType: '' });
+      setNewMaterial({ name: '', code: '', rate: 0, unit: 'pcs', category: '', subCategory: '', product: '', brandName: '', modelNumber: '', technicalSpecification: '', dimensions: '', finish: '', metalType: '' });
     } catch (err: any) {
       toast({ title: 'Error', description: 'Failed to update material', variant: 'destructive' });
     }
@@ -1032,13 +1166,12 @@ export default function AdminDashboard() {
                                   size="icon"
                                   className="text-destructive"
                                   onClick={() => {
-                                    // permanent delete via API
+                                    if (!window.confirm(`Delete shop "${shop.name}"? This cannot be undone.`)) return;
                                     deleteShop(shop.id).then(() => {
                                       setLocalShops((prev: any[]) => prev.filter((p: any) => p.id !== shop.id));
                                       toast({ title: 'Deleted', description: `${shop.name} removed` });
-                                    }).catch(() => {
-                                      setLocalShops((prev: any[]) => prev.filter((p: any) => p.id !== shop.id));
-                                      toast({ title: 'Deleted', description: `${shop.name} removed` });
+                                    }).catch((err) => {
+                                      toast({ title: 'Error', description: `Failed to delete ${shop.name}`, variant: 'destructive' });
                                     });
                                   }}
                                 >
@@ -1128,6 +1261,19 @@ export default function AdminDashboard() {
                                   </Select>
                                 </div>
                                 <div>
+                                  <Label>Product</Label>
+                                  <Select value={newMaterial.product || ''} onValueChange={(v) => setNewMaterial({ ...newMaterial, product: v })}>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {products.filter((p: any) => p.subcategory === newMaterial.subCategory).map((p: any) => (
+                                        <SelectItem key={p.id} value={p.name}>{p.name} {"(Subcategory: "}{p.subcategory_name}{")"}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div>
                                   <Label>Brand Name</Label>
                                   <Input value={newMaterial.brandName || ''} onChange={(e) => setNewMaterial({ ...newMaterial, brandName: e.target.value })} />
                                 </div>
@@ -1142,7 +1288,7 @@ export default function AdminDashboard() {
                               </div>
                               <div className="flex gap-2">
                                 <Button size="sm" onClick={handleUpdateMaterial}>Save Changes</Button>
-                                <Button size="sm" variant="ghost" onClick={() => { setEditingMaterialId(null); setNewMaterial({ name: '', code: '', rate: 0, unit: 'pcs', category: '', subCategory: '', brandName: '', modelNumber: '', technicalSpecification: '', dimensions: '', finish: '', metalType: '' }); }}>Cancel</Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setEditingMaterialId(null); setNewMaterial({ name: '', code: '', rate: 0, unit: 'pcs', category: '', subCategory: '', product: '', brandName: '', modelNumber: '', technicalSpecification: '', dimensions: '', finish: '', metalType: '' }); }}>Cancel</Button>
                               </div>
                             </div>
                           ) : (
@@ -1162,12 +1308,12 @@ export default function AdminDashboard() {
                                     size="icon"
                                     className="text-destructive"
                                     onClick={() => {
+                                      if (!window.confirm(`Delete material "${mat.name}"? This cannot be undone.`)) return;
                                       deleteMaterial(mat.id).then(() => {
                                         setLocalMaterials((prev: any[]) => prev.filter((p: any) => p.id !== mat.id));
                                         toast({ title: 'Deleted', description: `${mat.name} removed` });
-                                      }).catch(() => {
-                                        setLocalMaterials((prev: any[]) => prev.filter((p: any) => p.id !== mat.id));
-                                        toast({ title: 'Deleted', description: `${mat.name} removed` });
+                                      }).catch((err) => {
+                                        toast({ title: 'Error', description: `Failed to delete ${mat.name}`, variant: 'destructive' });
                                       });
                                     }}
                                   >
@@ -1221,16 +1367,6 @@ export default function AdminDashboard() {
                   )}
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Add Shop</CardTitle>
-                  <CardDescription className="text-sm">Suppliers can add their shop</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Link href="/admin/dashboard?tab=shops"><span className="text-sm text-sidebar-primary">Open Add Shop</span></Link>
-                </CardContent>
-              </Card>
             </div>
           )}
           </div>
@@ -1252,167 +1388,366 @@ export default function AdminDashboard() {
 
           {/* === CATEGORIES TAB (Admin/Software Team can manage, Purchase Team can view) === */}
           {canViewCategories && (
-            <TabsContent value="categories" className="space-y-4 mt-4">
-              {/* Add New Category - Only for Admin/Software Team */}
-              {canManageCategories && (
-                <Card className="border-purple-200 bg-purple-50">
-                  <CardHeader>
-                    <CardTitle className="text-purple-900">
-                      ➕ Add New Category
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex gap-2">
-                      <Input
-                        value={newCategory}
-                        onChange={(e) => setNewCategory(e.target.value)}
-                        placeholder="e.g. Flooring, Roofing"
-                        className="flex-1"
-                      />
-                      <Button
-                        onClick={handleAddCategory}
-                        className="bg-purple-600 hover:bg-purple-700"
-                      >
-                        <Plus className="h-4 w-4 mr-2" /> Add
-                      </Button>
+            <TabsContent value="categories" className="space-y-6 mt-4">
+              {/* Categories Section */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg">Categories</CardTitle>
+                      <CardDescription>Manage product categories</CardDescription>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Categories List */}
-              {categories.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Categories ({categories.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {editingCategory && (
-                      <div className="p-3 mb-3 bg-white rounded border">
-                        <div className="flex gap-2">
-                          <Input value={editingCategoryValue} onChange={(e) => setEditingCategoryValue(e.target.value)} />
-                          <Button onClick={() => {
-                            // save edit
-                            const old = editingCategory;
-                            const updated = editingCategoryValue.trim();
-                            if (!updated) return;
-                            setCategories((prev: string[]) => prev.map((c: string) => c === old ? updated : c));
-                            setSubCategories((prev: any[]) => prev.map((s: any) => s.category === old ? { ...s, category: updated } : s));
-                            setEditingCategory(null);
-                            setEditingCategoryValue("");
-                            toast({ title: 'Updated', description: `Category updated to ${updated}` });
-                          }}>Save</Button>
-                          <Button variant="ghost" onClick={() => { setEditingCategory(null); setEditingCategoryValue(""); }}>Cancel</Button>
-                        </div>
-                      </div>
+                    {canManageCategories && (
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button className="bg-purple-600 hover:bg-purple-700">
+                            <Plus className="h-4 w-4 mr-2" /> Add Category
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Add New Category</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label>Category Name <span className="text-red-500">*</span></Label>
+                              <Input
+                                value={newCategory}
+                                onChange={(e) => setNewCategory(e.target.value)}
+                                placeholder="e.g. Flooring, Roofing"
+                              />
+                            </div>
+                            <Button
+                              onClick={handleAddCategory}
+                              className="w-full bg-purple-600 hover:bg-purple-700"
+                            >
+                              <Plus className="h-4 w-4 mr-2" /> Add Category
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                     )}
-                    <div className="space-y-3">
-                      {categories.map((cat: string, idx: number) => {
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4">
+                    <Input
+                      value={searchCategories}
+                      onChange={(e) => setSearchCategories(e.target.value)}
+                      placeholder="Search categories..."
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    {categories
+                      .filter(cat => cat.toLowerCase().includes(searchCategories.toLowerCase()))
+                      .slice(0, 8)
+                      .map((cat: string, idx: number) => {
                         const subCats = getSubCategoriesForCategory(cat);
                         return (
-                          <div key={idx} className="p-3 border rounded bg-purple-50 hover:bg-purple-100 transition">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Package className="h-4 w-4 text-purple-600" />
-                                <span className="font-medium text-sm">{cat}</span>
-                                {disabledCategories.includes(cat) && (
-                                  <span className="text-xs text-muted-foreground">(disabled)</span>
-                                )}
+                          <div key={idx} className="p-4 border rounded-lg bg-purple-50 hover:bg-purple-100 transition">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <Package className="h-5 w-5 text-purple-600" />
+                                <div>
+                                  <span className="font-medium">{cat}</span>
+                                  {subCats.length > 0 && (
+                                    <span className="text-sm text-muted-foreground ml-2">
+                                      ({subCats.length} subcategories)
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Button size="sm" onClick={() => { setEditingCategory(cat); setEditingCategoryValue(cat); }}>Edit</Button>
-                                <Button size="sm" onClick={() => setDisabledCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat])}>
-                                  {disabledCategories.includes(cat) ? 'Enable' : 'Disable'}
-                                </Button>
-                                <Button size="sm" variant="destructive" onClick={async () => {
-                                  if (!window.confirm(`Delete category "${cat}" and its subcategories? This cannot be undone.`)) return;
-                                  try {
-                                    const token = localStorage.getItem('authToken');
-                                    const res = await fetch(`/api/categories/${encodeURIComponent(cat)}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
-                                    if (!res.ok) {
-                                      const txt = await res.text();
-                                      throw new Error(txt || `delete failed ${res.status}`);
+                              {canManageCategories && (
+                                <div className="flex items-center gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => { setEditingCategory(cat); setEditingCategoryValue(cat); }}>
+                                    Edit
+                                  </Button>
+                                  <Button size="sm" variant="destructive" onClick={async () => {
+                                    if (!window.confirm(`Delete category "${cat}" and its subcategories? This cannot be undone.`)) return;
+                                    try {
+                                      await apiFetch(`/categories/${encodeURIComponent(cat)}`, { method: 'DELETE' });
+                                      setCategories(prev => prev.filter(c => c !== cat));
+                                      setSubCategories(prev => prev.filter(s => s.category !== cat));
+                                      toast({ title: 'Deleted', description: `Category ${cat} removed` });
+                                    } catch (err) {
+                                      console.error('delete category error', err);
+                                      toast({ title: 'Error', description: 'Failed to delete category', variant: 'destructive' });
                                     }
-                                    // remove locally
-                                    setCategories(prev => prev.filter(c => c !== cat));
-                                    setSubCategories(prev => prev.filter(s => s.category !== cat));
-                                    toast({ title: 'Deleted', description: `Category ${cat} removed` });
-                                  } catch (err) {
-                                    console.error('delete category error', err);
-                                    toast({ title: 'Error', description: 'Failed to delete category', variant: 'destructive' });
-                                  }
-                                }}>Delete</Button>
-                              </div>
+                                  }}>
+                                    Delete
+                                  </Button>
+                                </div>
+                              )}
                             </div>
-                            {subCats.length > 0 && (
-                              <div className="ml-6 text-xs text-muted-foreground space-y-1">
-                                {subCats.map((sub: any) => (
-                                  <div key={sub.id} className="flex items-center gap-2">
-                                    <span className="inline-block w-1 h-1 rounded-full bg-gray-400"></span>
-                                    {sub.name}
-                                  </div>
-                                ))}
+                            {editingCategory === cat && (
+                              <div className="mt-3 p-3 bg-white rounded border">
+                                <div className="flex gap-2">
+                                  <Input
+                                    value={editingCategoryValue}
+                                    onChange={(e) => setEditingCategoryValue(e.target.value)}
+                                    placeholder="Category name"
+                                  />
+                                  <Button onClick={() => {
+                                    const old = editingCategory;
+                                    const updated = editingCategoryValue.trim();
+                                    if (!updated) return;
+                                    setCategories((prev: string[]) => prev.map((c: string) => c === old ? updated : c));
+                                    setSubCategories((prev: any[]) => prev.map((s: any) => s.category === old ? { ...s, category: updated } : s));
+                                    setEditingCategory(null);
+                                    setEditingCategoryValue("");
+                                    toast({ title: 'Updated', description: `Category updated to ${updated}` });
+                                  }}>Save</Button>
+                                  <Button variant="ghost" onClick={() => { setEditingCategory(null); setEditingCategoryValue(""); }}>Cancel</Button>
+                                </div>
                               </div>
                             )}
                           </div>
                         );
                       })}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+                </CardContent>
+              </Card>
 
-              {/* Add SubCategory - Only for Admin/Software Team */}
-              {canManageCategories && (
-                <Card className="border-green-200 bg-green-50">
-                  <CardHeader>
-                    <CardTitle className="text-green-900">
-                      ➕ Add Sub-Category
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Select Category <span className="text-red-500">*</span></Label>
-                      <Select
-                        value={selectedCategoryForSubCategory}
-                        onValueChange={setSelectedCategoryForSubCategory}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose a category..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map((cat: string) => (
-                            <SelectItem key={cat} value={cat}>
-                              {cat}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+              {/* Subcategories Section */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg">Subcategories</CardTitle>
+                      <CardDescription>Manage product subcategories</CardDescription>
                     </div>
+                    {canManageCategories && (
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button className="bg-green-600 hover:bg-green-700">
+                            <Plus className="h-4 w-4 mr-2" /> Add Subcategory
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Add New Subcategory</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label>Select Category <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={selectedCategoryForSubCategory}
+                                onValueChange={setSelectedCategoryForSubCategory}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Choose a category..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categories.map((cat: string) => (
+                                    <SelectItem key={cat} value={cat}>
+                                      {cat}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Subcategory Name <span className="text-red-500">*</span></Label>
+                              <Input
+                                value={newSubCategory}
+                                onChange={(e) => setNewSubCategory(e.target.value)}
+                                placeholder="e.g. Commercial, Residential"
+                              />
+                            </div>
+                            <Button
+                              onClick={handleAddSubCategory}
+                              className="w-full bg-green-600 hover:bg-green-700"
+                            >
+                              <Plus className="h-4 w-4 mr-2" /> Add Subcategory
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4">
+                    <Input
+                      value={searchSubCategories}
+                      onChange={(e) => setSearchSubCategories(e.target.value)}
+                      placeholder="Search subcategories..."
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    {subCategories
+                      .filter(sub => sub.name.toLowerCase().includes(searchSubCategories.toLowerCase()))
+                      .slice(0, 8)
+                      .map((sub: any) => (
+                        <div key={sub.id} className="p-4 border rounded-lg bg-green-50 hover:bg-green-100 transition">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Package className="h-5 w-5 text-green-600" />
+                              <div>
+                                <span className="font-medium">{sub.name}</span>
+                                <span className="text-sm text-muted-foreground ml-2">
+                                  (Category: {sub.category})
+                                </span>
+                              </div>
+                            </div>
+                            {canManageCategories && (
+                              <Button size="sm" variant="destructive" onClick={async () => {
+                                if (!window.confirm(`Delete subcategory "${sub.name}"? This cannot be undone.`)) return;
+                                try {
+                                  await apiFetch(`/subcategories/${sub.id}`, { method: 'DELETE' });
+                                  setSubCategories(prev => prev.filter(s => s.id !== sub.id));
+                                  toast({ title: 'Deleted', description: `Subcategory ${sub.name} removed` });
+                                } catch (err) {
+                                  console.error('delete subcategory error', err);
+                                  toast({ title: 'Error', description: 'Failed to delete subcategory', variant: 'destructive' });
+                                }
+                              }}>
+                                Delete
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
 
-                    <div className="space-y-2">
-                      <Label>Sub-Category Name <span className="text-red-500">*</span></Label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={newSubCategory}
-                          onChange={(e) => setNewSubCategory(e.target.value)}
-                          placeholder="e.g. Commercial, Residential"
-                          className="flex-1"
-                        />
-                        <Button
-                          onClick={handleAddSubCategory}
-                          className="bg-green-600 hover:bg-green-700"
-                        >
-                          <Plus className="h-4 w-4 mr-2" /> Add
-                        </Button>
-                      </div>
+              {/* Products Section */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg">Products</CardTitle>
+                      <CardDescription>Manage individual products</CardDescription>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Shops list moved to Shops tab */}
-            
+                    {canManageCategories && (
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button className="bg-orange-600 hover:bg-orange-700">
+                            <Plus className="h-4 w-4 mr-2" /> Add Product
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Add New Product</DialogTitle>
+                          </DialogHeader>
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label>Product Name <span className="text-red-500">*</span></Label>
+                              <Input
+                                value={newProduct.name}
+                                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                                placeholder="Enter product name"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Subcategory <span className="text-red-500">*</span></Label>
+                              <Select
+                                value={newProduct.subcategory}
+                                onValueChange={(value) => setNewProduct({ ...newProduct, subcategory: value })}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select subcategory" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {subCategories.map((sc: any) => (
+                                    <SelectItem key={sc.id} value={sc.name}>
+                                      {sc.name} ({sc.category})
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <Button
+                              onClick={handleAddProduct}
+                              className="w-full bg-orange-600 hover:bg-orange-700"
+                            >
+                              <Plus className="h-4 w-4 mr-2" /> Add Product
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4">
+                    <Input
+                      value={searchProducts}
+                      onChange={(e) => setSearchProducts(e.target.value)}
+                      placeholder="Search products..."
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    {products
+                      .filter(product => product.name.toLowerCase().includes(searchProducts.toLowerCase()))
+                      .slice(0, 8)
+                      .map((product: any) => (
+                        <div key={product.id} className="p-4 border rounded-lg bg-orange-50 hover:bg-orange-100 transition">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <Package className="h-5 w-5 text-orange-600" />
+                              <div>
+                                <span className="font-medium">{product.name}</span>
+                                <span className="text-sm text-muted-foreground ml-2">{"(Subcategory: "}{product.subcategory_name}{")"}</span>
+                              </div>
+                            </div>
+                            {canManageCategories && (
+                              <div className="flex items-center gap-2">
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button size="sm" variant="outline" onClick={() => setEditingProduct(product)}>
+                                      Edit
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Edit Product</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <Label>Product Name <span className="text-red-500">*</span></Label>
+                                        <Input
+                                          value={editingProduct?.name || ""}
+                                          onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                                          placeholder="Product name"
+                                        />
+                                      </div>
+                                      <div className="space-y-2">
+                                        <Label>Subcategory <span className="text-red-500">*</span></Label>
+                                        <Select
+                                          value={editingProduct?.subcategory || ""}
+                                          onValueChange={(value) => setEditingProduct({ ...editingProduct, subcategory: value })}
+                                        >
+                                          <SelectTrigger>
+                                            <SelectValue placeholder="Select subcategory" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {subCategories.map((sc: any) => (
+                                              <SelectItem key={sc.id} value={sc.name}>
+                                                {sc.name} ({sc.category})
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <Button onClick={handleUpdateProduct} className="w-full">
+                                        Save Changes
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                                <Button size="sm" variant="destructive" onClick={() => handleDeleteProduct(product.id)}>
+                                  Delete
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
           )}
 
@@ -1443,7 +1778,7 @@ export default function AdminDashboard() {
                             name: e.target.value,
                           })
                         }
-                        placeholder="Enter material name"
+                        placeholder="Enter Item name"
                       />
                       {newMasterMaterial.name && 
                         masterMaterials.some((m: any) => m.name.toLowerCase().trim() === newMasterMaterial.name.toLowerCase().trim()) && (
@@ -1478,277 +1813,6 @@ export default function AdminDashboard() {
                   >
                     <Plus className="mr-2 h-4 w-4" /> Create Material
                   </Button>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* SUPPLIER: Add Detailed Material from Master */}
-            {user?.role === "supplier" && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Add Material to Inventory</CardTitle>
-                  <CardDescription>
-                    Select a master material and fill in additional details
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={async () => {
-                      try {
-                        const res = await fetch('/api/categories');
-                        if (res.ok) {
-                          const data = await res.json();
-                          if (data?.categories) setCategories(data.categories);
-                        }
-                      } catch (e) { console.warn('refresh categories failed', e); }
-                      try {
-                        const res2 = await fetch('/api/subcategories-admin');
-                        if (res2.ok) {
-                          const data2 = await res2.json();
-                          if (data2?.subcategories) setSubCategories(data2.subcategories);
-                        }
-                      } catch (e) { console.warn('refresh subcategories failed', e); }
-                      toast({ title: 'Refreshed', description: 'Categories and subcategories reloaded' });
-                    }}>Refresh categories</Button>
-                  </div>
-                  {masterMaterials.length === 0 ? (
-                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
-                      ⚠️ No master materials available yet. Admin/Software Team will add them soon.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {/* Master Material Selection */}
-                      <div className="space-y-2">
-                        <Label>Select Master Material <span className="text-red-500">*</span></Label>
-                        <Select
-                          value={newMaterial.masterMaterialId || ""}
-                          onValueChange={(v) => {
-                            const mm = masterMaterials.find((m: any) => m.id === v);
-                            if (mm) {
-                              setNewMaterial({
-                                ...newMaterial,
-                                masterMaterialId: v,
-                                name: mm.name,
-                                code: mm.code,
-                              });
-                            }
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Choose a master material..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {masterMaterials.map((mm: any) => (
-                              <SelectItem key={mm.id} value={mm.id}>
-                                {mm.name} ({mm.code})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {newMaterial.masterMaterialId && (
-                        <>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Rate <span className="text-red-500">*</span></Label>
-                              <Input
-                                type="number"
-                                value={newMaterial.rate || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    rate: parseFloat(e.target.value) || 0,
-                                  })
-                                }
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Unit  <span className="text-red-500">*</span></Label>
-                              <Select
-                                value={newMaterial.unit || ""}
-                                onValueChange={(v) =>
-                                  setNewMaterial({ ...newMaterial, unit: v })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {UNIT_OPTIONS.map((c) => (
-                                    <SelectItem key={c} value={c}>
-                                      {c}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Category  <span className="text-red-500">*</span></Label>
-                              <Select
-                                value={newMaterial.category || ""}
-                                onValueChange={(v) =>
-                                  setNewMaterial({ ...newMaterial, category: v, subCategory: "" })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {categories.map((c: string) => (
-                                    <SelectItem key={c} value={c}>
-                                      {c}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Sub Category  <span className="text-red-500">*</span></Label>
-                              <Select
-                                value={newMaterial.subCategory || ""}
-                                onValueChange={(v) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    subCategory: v,
-                                  })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {getSubCategoriesForCategory(newMaterial.category || "").map((sc: any) => (
-                                    <SelectItem key={sc.id} value={sc.name}>
-                                      {sc.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Brand Name  <span className="text-red-500">*</span></Label>
-                              <Input
-                                value={newMaterial.brandName || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    brandName: e.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Model Number</Label>
-                              <Input
-                                value={newMaterial.modelNumber || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    modelNumber: e.target.value,
-                                  })
-                                }
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Dimensions</Label>
-                              <Input
-                                value={newMaterial.dimensions || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    dimensions: e.target.value,
-                                  })
-                                }
-                                placeholder="L x W x H"
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Finish</Label>
-                              <Input
-                                value={newMaterial.finish || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    finish: e.target.value,
-                                  })
-                                }
-                                placeholder="e.g. Matte, Glossy"
-                              />
-                            </div>
-
-                            <div className="space-y-2">
-                              <Label>Grade Type</Label>
-                              <Input
-                                value={newMaterial.metalType || ""}
-                                onChange={(e) =>
-                                  setNewMaterial({
-                                    ...newMaterial,
-                                    metalType: e.target.value,
-                                  })
-                                }
-                                placeholder="e.g. SS 304, Aluminum"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Technical Specification</Label>
-                            <Textarea
-                              value={newMaterial.technicalSpecification || ""}
-                              onChange={(e) =>
-                                setNewMaterial({
-                                  ...newMaterial,
-                                  technicalSpecification: e.target.value,
-                                })
-                              }
-                              placeholder="Enter technical details..."
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Product Image</Label>
-                            <Input type="file" className="cursor-pointer" />
-                          </div>
-
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              onClick={() => {
-                                setActiveTab("dashboard");
-                                if (typeof window !== "undefined") {
-                                  const url = new URL(window.location.href);
-                                  url.searchParams.set("tab", "dashboard");
-                                  window.history.replaceState({}, "", url.toString());
-                                }
-                              }}
-                              className="w-full md:w-auto"
-                            >
-                              Back
-                            </Button>
-
-                            <Button
-                              onClick={editingMaterialId ? handleUpdateMaterial : handleAddMaterial}
-                              className="w-full md:w-auto"
-                            >
-                              {editingMaterialId ? (
-                                <>Save Changes</>
-                              ) : (
-                                <><Plus className="mr-2 h-4 w-4" /> Add Material</>
-                              )}
-                            </Button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             )}
@@ -1794,10 +1858,8 @@ export default function AdminDashboard() {
                                     return;
                                   }
                                   try {
-                                    const token = localStorage.getItem('authToken');
-                                    const res = await fetch(`/api/material-templates/${template.id}`, {
+                                    const res = await apiFetch(`/material-templates/${template.id}`, {
                                       method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
                                       body: JSON.stringify({ name: newMaterial.name })
                                     });
                                     if (!res.ok) throw new Error('update failed');
@@ -1827,14 +1889,18 @@ export default function AdminDashboard() {
                               <Button size="sm" variant="destructive" onClick={async () => {
                                 if (!window.confirm(`Delete "${template.name}"? This cannot be undone.`)) return;
                                 try {
-                                  const token = localStorage.getItem('authToken');
-                                  const res = await fetch(`/api/material-templates/${template.id}`, { method: 'DELETE', headers: token ? { Authorization: `Bearer ${token}` } : {} });
-                                  if (!res.ok) throw new Error('delete failed');
+                                  console.log('[DELETE template]', template.id, template.name);
+                                  const res = await apiFetch(`/material-templates/${template.id}`, { method: 'DELETE' });
+                                  console.log('[DELETE response]', res.status, res.ok);
+                                  if (!res.ok) {
+                                    const errorData = await res.json();
+                                    throw new Error(errorData.message || 'Failed to delete');
+                                  }
                                   setMasterMaterials(prev => prev.filter(m => m.id !== template.id));
                                   toast({ title: 'Success', description: 'Material deleted' });
                                 } catch (err) {
                                   console.error('delete error', err);
-                                  toast({ title: 'Error', description: 'Failed to delete material', variant: 'destructive' });
+                                  toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete material', variant: 'destructive' });
                                 }
                               }}>Delete</Button>
                             </div>

@@ -13,6 +13,8 @@ import { useData } from "@/lib/store";
 import { WallType, wallOptions, subOptionsMap } from "@/lib/constants";
 import { computeRequired, ComputedMaterials } from "./computeRequired";
 import { CheckCircle2 } from "lucide-react";
+import html2pdf from "html2pdf.js";
+
 
 const ctintLogo = "/image.png";
 
@@ -40,6 +42,30 @@ export default function CivilWallEstimator() {
     { materialId: string; selectedShopId: string }[]
   >([]);
 
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+
+  type WallTypeItem = {
+    id: string;
+    value: WallType | string; // allow custom types
+    label: string;
+  };
+
+  const [wallTypeList, setWallTypeList] = useState<WallTypeItem[]>([
+    { id: "civil", value: "civil", label: "Civil Wall (Brick)" },
+    { id: "gypsum", value: "gypsum", label: "Gypsum Partition" },
+    { id: "plywood", value: "plywood", label: "Plywood Partition" },
+    { id: "gypsum-plywood", value: "gypsum-plywood", label: "Gypsum + Plywood" },
+    { id: "gypsum-glass", value: "gypsum-glass", label: "Gypsum + Glass" },
+    { id: "plywood-glass", value: "plywood-glass", label: "Plywood + Glass" },
+  ]);
+
+  const [showAddWall, setShowAddWall] = useState(false);
+  const [newWallLabel, setNewWallLabel] = useState("");
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [menuOpenIndex, setMenuOpenIndex] = useState<number | null>(null);
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+
   const [computed, setComputed] = useState<ComputedMaterials | null>(null);
 
   // Editable materials state used in Step 5 (rate/quantity editable by user)
@@ -64,6 +90,19 @@ export default function CivilWallEstimator() {
       setComputed(result);
     }
   }, [length, height, wallType, subOption, brickWastage]);
+
+
+  const [boqRows, setBoqRows] = useState<
+    {
+      id: string;
+      item: string;
+      location: string;
+      unit: string;
+      qty: number;
+      supplyRate: number;
+      installRate: number;
+    }[]
+  >([]);
 
   // Get available materials filtered by wall type
   const getAvailableMaterials = () => {
@@ -210,19 +249,17 @@ export default function CivilWallEstimator() {
     const isSelected = isMaterialTypeSelected(keywords);
     return (
       <div
-        className={`grid grid-cols-12 gap-2 p-3 border rounded ${
-          isSelected
-            ? "bg-green-50 border-green-200"
-            : "bg-red-50 border-red-200"
-        }`}
+        className={`grid grid-cols-12 gap-2 p-3 border rounded ${isSelected
+          ? "bg-green-50 border-green-200"
+          : "bg-red-50 border-red-200"
+          }`}
       >
         <div className="col-span-5 font-medium">{name}</div>
         <div className="col-span-2 text-right font-bold">{Math.ceil(quantity)}</div>
         <div className="col-span-2 text-right text-muted-foreground">{unit}</div>
         <div
-          className={`col-span-3 text-right font-semibold ${
-            isSelected ? "text-green-600" : "text-red-600"
-          }`}
+          className={`col-span-3 text-right font-semibold ${isSelected ? "text-green-600" : "text-red-600"
+            }`}
         >
           {isSelected ? "✓ SELECTED" : "⚠️ MISSING"}
         </div>
@@ -353,7 +390,7 @@ export default function CivilWallEstimator() {
 
   // Prefill final shop/company details when opening final BOQ step
   useEffect(() => {
-    if (step === 7) {
+    if (step === 8) {
       const details = getMaterialsWithDetails();
       if (details.length > 0) {
         const firstShopId = details[0].shopId;
@@ -435,30 +472,184 @@ export default function CivilWallEstimator() {
                   animate={{ opacity: 1 }}
                   className="space-y-4"
                 >
-                  <Label className="text-lg">Select Wall Type</Label>
-                  <div className="grid gap-3">
-                    {wallOptions.map((opt) => (
+                  {/* Title + Add */}
+                  <div className="flex justify-between items-center">
+                    <Label className="text-lg">Select Wall Type</Label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditIndex(null);
+                        setNewWallLabel("");
+                        setShowAddWall(true);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center rounded-full border hover:bg-gray-100"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {/* Add / Edit Input */}
+                  {showAddWall && (
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Enter wall type name"
+                        value={newWallLabel}
+                        onChange={(e) => setNewWallLabel(e.target.value)}
+                      />
                       <Button
-                        key={opt.value}
-                        variant={wallType === opt.value ? "default" : "outline"}
                         onClick={() => {
-                          setWallType(opt.value as WallType);
-                          setSubOption(null);
-                          setSelectedMaterials([]);
+                          if (!newWallLabel.trim()) return;
+
+                          if (editIndex !== null) {
+                            // EDIT existing label
+                            setWallTypeList((prev) =>
+                              prev.map((w, i) =>
+                                i === editIndex ? { ...w, label: newWallLabel.trim() } : w
+                              )
+                            );
+                          } else {
+                            // ADD new wall type
+                            setWallTypeList((prev) => [
+                              ...prev,
+                              {
+                                id: Date.now().toString(),
+                                value: newWallLabel.trim().toLowerCase().replace(/\s+/g, "-"),
+                                label: newWallLabel.trim(),
+                              },
+                            ]);
+                          }
+
+                          setShowAddWall(false);
+                          setNewWallLabel("");
+                          setEditIndex(null);
                         }}
-                        className="justify-start h-auto py-3"
                       >
-                        <div className="text-left">
-                          <div className="font-semibold">{opt.label}</div>
-                        </div>
+                        {editIndex !== null ? "Update" : "Add"}
                       </Button>
+
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setShowAddWall(false);
+                          setEditIndex(null);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Wall Type Cards */}
+                  <div className="grid gap-3">
+                    {wallTypeList.map((item, index) => (
+                      <div key={item.id} className="relative">
+                        <Button
+                          variant={wallType === item.value ? "default" : "outline"}
+                          onClick={() => {
+                            setWallType(item.value);
+                            setSubOption(null);
+                            setSelectedMaterials([]);
+                          }}
+                          className="w-full justify-between h-auto py-3"
+                        >
+                          <span>{item.label}</span>
+
+                          {/* Dropdown Menu Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMenuOpenIndex(menuOpenIndex === index ? null : index);
+                            }}
+                            className="px-2 text-lg"
+                          >
+                            ⋮
+                          </button>
+                        </Button>
+
+                        {/* Dropdown Menu */}
+                        {menuOpenIndex === index && (
+                          <div className="absolute right-2 top-12 bg-white border rounded shadow-md z-50 w-28">
+                            <button
+                              className="block w-full text-left px-3 py-2 hover:bg-gray-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditIndex(index);
+                                setNewWallLabel(item.label);
+                                setShowAddWall(true);
+                                setMenuOpenIndex(null);
+                              }}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              className="block w-full text-left px-3 py-2 text-red-600 hover:bg-gray-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteIndex(index);
+                                setMenuOpenIndex(null);
+                                setShowDeleteModal(true); // open confirmation
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
-                  <div className="flex justify-end gap-2 pt-6">
+
+                  {/* Next Button */}
+                  <div className="flex justify-end pt-4">
                     <Button disabled={!wallType} onClick={() => setStep(2)}>
-                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                      Next
                     </Button>
                   </div>
+
+                  {/* Delete Confirmation Modal */}
+                  {showDeleteModal && deleteIndex !== null && (
+                    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
+                      <div className="bg-white rounded-lg shadow-lg w-80 p-5">
+                        <h2 className="text-lg font-semibold mb-4">Confirm Delete</h2>
+                        <p className="mb-4">
+                          Are you sure you want to delete "{wallTypeList[deleteIndex].label}"?
+                        </p>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setShowDeleteModal(false);
+                              setDeleteIndex(null);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => {
+                              setWallTypeList((prev) =>
+                                prev.filter((_, i) => i !== deleteIndex)
+                              );
+
+                              // Reset selection if deleted wall was selected
+                              if (wallType === wallTypeList[deleteIndex].value) {
+                                setWallType(null);
+                                setSubOption(null);
+                                setSelectedMaterials([]);
+                              }
+
+                              setDeleteIndex(null);
+                              setShowDeleteModal(false);
+                            }}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </motion.div>
               )}
 
@@ -643,12 +834,7 @@ export default function CivilWallEstimator() {
                   animate={{ opacity: 1 }}
                   className="space-y-4"
                 >
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <p className="text-sm text-blue-900">
-                      <strong>ℹ️ Note:</strong> No materials available in shop master yet. All materials will show as <strong>Missing Required</strong> in the next step. You can proceed without selecting any materials.
-                    </p>
-                  </div>
-                  
+
                   <Label className="text-lg">Select Materials & Shops</Label>
                   <div className="space-y-3 max-h-64 overflow-y-auto border rounded-lg p-4">
                     {getAvailableMaterials().length === 0 ? (
@@ -748,7 +934,6 @@ export default function CivilWallEstimator() {
                 </motion.div>
               )}
 
-              {/* Step 5: BOQ & Required Materials */}
               {/* STEP 5: Review Required Materials */}
               {step === 5 && (
                 <motion.div
@@ -782,7 +967,7 @@ export default function CivilWallEstimator() {
                               <Input
                                 type="number"
                                 value={editableMaterials[mat.id]?.quantity ?? mat.quantity}
-                                onChange={(e) => setEditableMaterials((prev) => ({...prev, [mat.id]: {...(prev[mat.id] || {}), quantity: Number(e.target.value)}}))}
+                                onChange={(e) => setEditableMaterials((prev) => ({ ...prev, [mat.id]: { ...(prev[mat.id] || {}), quantity: Number(e.target.value) } }))}
                                 className="w-20 mx-auto"
                               />
                             </div>
@@ -792,7 +977,7 @@ export default function CivilWallEstimator() {
                               <Input
                                 type="number"
                                 value={editableMaterials[mat.id]?.rate ?? mat.rate}
-                                onChange={(e) => setEditableMaterials((prev) => ({...prev, [mat.id]: {...(prev[mat.id] || {}), rate: Number(e.target.value)}}))}
+                                onChange={(e) => setEditableMaterials((prev) => ({ ...prev, [mat.id]: { ...(prev[mat.id] || {}), rate: Number(e.target.value) } }))}
                                 className="w-20 mx-auto"
                               />
                             </div>
@@ -946,10 +1131,23 @@ export default function CivilWallEstimator() {
                       </Button>
                       <Button
                         className="bg-indigo-600 text-white font-semibold px-4 py-2 rounded-lg"
-                        onClick={() => setStep(7)}
                         disabled={getFinalMaterials().length === 0}
+                        onClick={() => {
+                          setBoqRows(
+                            getFinalMaterials().map((m) => ({
+                              id: m.id,
+                              item: m.name,
+                              location: "",
+                              unit: m.unit,
+                              qty: m.quantity,
+                              supplyRate: m.rate,
+                              installRate: 0,
+                            }))
+                          );
+                          setStep(7);
+                        }}
                       >
-                        Finalize BOQ
+                        Add to BOQ
                       </Button>
                       <Button
                         variant="outline"
@@ -971,8 +1169,8 @@ export default function CivilWallEstimator() {
                 </motion.div>
               )}
 
-              {/* STEP 7: Finalize BOQ (manual fields + export) */}
-              {step === 7 && (
+              {/* STEP 8:  (manual fields + export) */}
+              {step === 8 && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
                   <div className="grid grid-cols-3 gap-4">
                     <div>
@@ -1061,7 +1259,7 @@ export default function CivilWallEstimator() {
                     <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
                       <thead>
                         <tr>
-                          {["#","Item","Description","Unit","Qty","Rate","Supplier","Amount"].map((h) => (
+                          {["#", "Item", "Description", "Unit", "Qty", "Rate", "Supplier", "Amount"].map((h) => (
                             <th key={h} style={{ border: "1px solid #000", padding: 6, background: "#000", color: "#fff", fontSize: 10, textAlign: h === "Qty" || h === "Rate" || h === "Amount" ? "right" : "left", fontWeight: "bold" }}>{h}</th>
                           ))}
                         </tr>
@@ -1069,7 +1267,7 @@ export default function CivilWallEstimator() {
                       <tbody>
                         {getFinalMaterials().map((m, i) => (
                           <tr key={m.id}>
-                            <td style={{ border: "1px solid #000", padding: 6, textAlign: "center" }}>{i+1}</td>
+                            <td style={{ border: "1px solid #000", padding: 6, textAlign: "center" }}>{i + 1}</td>
                             <td style={{ border: "1px solid #000", padding: 6 }}>{m.name}</td>
                             <td style={{ border: "1px solid #000", padding: 6 }}>{materialDescriptions[m.id] || m.name}</td>
                             <td style={{ border: "1px solid #000", padding: 6, textAlign: "center" }}>{m.unit}</td>
@@ -1129,6 +1327,192 @@ export default function CivilWallEstimator() {
                   </div>
                 </motion.div>
               )}
+
+              {step === 7 && (
+                <div className="space-y-6" id="boq-pdf">
+                  <h2 className="text-2xl font-bold">Bill of Quantities</h2>
+
+                  <div className="border rounded-lg overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        {/* MAIN HEADER */}
+                        <tr className="bg-muted">
+                          <th className="border px-2 py-2">S.No</th>
+                          <th className="border px-2 py-2">Item</th>
+                          <th className="border px-2 py-2">Location</th>
+                          <th className="border px-2 py-2">Description</th>
+                          <th className="border px-2 py-2">Unit</th>
+                          <th className="border px-2 py-2 text-right">Qty</th>
+                          <th className="border px-2 py-2 text-center" colSpan={2}>
+                            Rate
+                          </th>
+                          <th className="border px-2 py-2 text-center" colSpan={2}>
+                            Amount
+                          </th>
+                        </tr>
+
+                        {/* SUB HEADER */}
+                        <tr className="bg-muted/50">
+                          <th colSpan={6}></th>
+                          <th className="border px-2 py-1 text-right">Supply</th>
+                          <th className="border px-2 py-1 text-right">Installation</th>
+                          <th className="border px-2 py-1 text-right">Supply</th>
+                          <th className="border px-2 py-1 text-right">Installation</th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {boqRows.map((row, index) => {
+                          const supplyAmount = row.qty * row.supplyRate;
+                          const installAmount = row.qty * row.installRate;
+
+                          return (
+                            <tr key={row.id}>
+                              <td className="border px-2 py-2 text-center">
+                                {index + 1}
+                              </td>
+
+                              <td className="border px-2 py-2">{row.item}</td>
+
+                              <td className="border px-2 py-2">
+                                {row.location || "-"}
+                              </td>
+
+                              {/* ONLY EDITABLE COLUMN */}
+                              <td className="border px-2 py-2">
+                                <Input
+                                  placeholder="Description"
+                                  value={(row as any).description || ""}
+                                  onChange={(e) =>
+                                    setBoqRows((prev) =>
+                                      prev.map((r) =>
+                                        r.id === row.id
+                                          ? { ...r, description: e.target.value }
+                                          : r
+                                      )
+                                    )
+                                  }
+                                />
+                              </td>
+
+                              <td className="border px-2 py-2 text-center">{row.unit}</td>
+
+                              <td className="border px-2 py-2 text-right">{row.qty}</td>
+
+                              <td className="border px-2 py-2 text-right">
+                                ₹{row.supplyRate}
+                              </td>
+
+                              <td className="border px-2 py-2 text-right">
+                                ₹{row.installRate}
+                              </td>
+
+                              <td className="border px-2 py-2 text-right font-semibold">
+                                ₹{supplyAmount.toFixed(2)}
+                              </td>
+
+                              <td className="border px-2 py-2 text-right font-semibold">
+                                ₹{installAmount.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* ===== STEP 7 PDF CONTENT (ALWAYS IN DOM) ===== */}
+                  <div
+                    id="step7-pdf"
+                    style={{
+                      position: "fixed",
+                      left: 0,
+                      top: 0,
+                      width: "210mm",
+                      background: "#fff",
+                      color: "#000",
+                      padding: "16mm",
+                      fontFamily: "Arial",
+                      fontSize: 11,
+                      opacity: 0,
+                      pointerEvents: "none",
+                      zIndex: -1,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: "bold" }}>Concept Trunk Interiors</div>
+                        <div style={{ fontSize: 10 }}>Bill of Quantities</div>
+                      </div>
+
+                      <img
+                        src={ctintLogo}
+                        crossOrigin="anonymous"
+                        style={{ height: 50, objectFit: "contain" }}
+                      />
+                    </div>
+
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr>
+                          {["S.No", "Item", "Location", "Description", "Unit", "Qty", "Supply Rate", "Install Rate", "Supply Amt", "Install Amt"].map(h => (
+                            <th
+                              key={h}
+                              style={{
+                                border: "1px solid #000",
+                                padding: 6,
+                                fontSize: 10,
+                                background: "#f1f1f1",
+                                textAlign: h.includes("Qty") || h.includes("Rate") || h.includes("Amt") ? "right" : "left",
+                              }}
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {boqRows.map((row, index) => {
+                          const supplyAmount = row.qty * row.supplyRate;
+                          const installAmount = row.qty * row.installRate;
+
+                          return (
+                            <tr key={row.id}>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "center" }}>{index + 1}</td>
+                              <td style={{ border: "1px solid #000", padding: 6 }}>{row.item}</td>
+                              <td style={{ border: "1px solid #000", padding: 6 }}>{row.location || "-"}</td>
+                              <td style={{ border: "1px solid #000", padding: 6 }}>{(row as any).description || ""}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "center" }}>{row.unit}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "right" }}>{row.qty}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "right" }}>{row.supplyRate}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "right" }}>{row.installRate}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "right" }}>{supplyAmount.toFixed(2)}</td>
+                              <td style={{ border: "1px solid #000", padding: 6, textAlign: "right" }}>{installAmount.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ACTION BUTTONS – RIGHT SIDE ONLY */}
+                  <div className="flex justify-end gap-3 pt-4">
+                    <Button variant="outline" onClick={() => setStep(6)}>
+                      Back
+                    </Button>
+
+                    <Button variant="outline" disabled>
+                      Finalize BOQ
+                    </Button>
+
+                    <Button>
+                      Export PDF
+                    </Button>
+
+                  </div>
+                </div>
+              )}
+
             </AnimatePresence>
           </CardContent>
         </Card>

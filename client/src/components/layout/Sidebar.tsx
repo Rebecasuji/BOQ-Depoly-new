@@ -22,7 +22,8 @@ import {
   MessageSquare,
   CheckCircle2,
   ShoppingCart,
-  AlertCircle
+  AlertCircle,
+  Users
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,13 +57,15 @@ export function Sidebar() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/shops-pending-approval');
+        const res = await fetch("/api/shops-pending-approval");
         if (res.ok) {
           const data = await res.json();
-          setPendingShopCount((data?.shops || []).filter((r: any) => r.status === 'pending').length);
+          setPendingShopCount(
+            (data?.shops || []).filter((r: any) => r.status === "pending").length
+          );
         }
       } catch (e) {
-        console.warn('load shop count failed', e);
+        console.warn("load shop count failed", e);
       }
     })();
   }, []);
@@ -74,9 +77,11 @@ export function Sidebar() {
         setPendingMaterialCount(0);
         return;
       }
-      setPendingMaterialCount((materialApprovalRequests || []).filter((r: any) => r.status === 'pending').length);
+      setPendingMaterialCount(
+        (materialApprovalRequests || []).filter((r: any) => r.status === "pending").length
+      );
     } catch (e) {
-      console.warn('compute material pending count failed', e);
+      console.warn("compute material pending count failed", e);
       setPendingMaterialCount(0);
     }
   }, [materialApprovalRequests]);
@@ -92,7 +97,7 @@ export function Sidebar() {
       const unread = (supportMessages || []).filter((m: any) => m.is_read === false).length;
       setMessageCount(unread || (supportMessages || []).length);
     } catch (e) {
-      console.warn('compute message count failed', e);
+      console.warn("compute message count failed", e);
       setMessageCount(0);
     }
   }, [supportMessages]);
@@ -102,10 +107,14 @@ export function Sidebar() {
     setLocation("/");
   };
 
-  const isAdminOrSoftware = user?.role === 'admin' || user?.role === 'software_team';
-  const isAdminOrSoftwareOrPurchaseTeam = user?.role === 'admin' || user?.role === 'software_team' || user?.role === 'purchase_team';
-  const isSupplierOrPurchase = user?.role === 'supplier' || user?.role === 'purchase_team';
-  const isClient = user?.role === 'user';
+  const isAdminOrSoftware = user?.role === "admin" || user?.role === "software_team";
+  const isAdminOrSoftwareOrPurchaseTeam =
+    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team";
+  const isSupplierOrPurchase = user?.role === "supplier" || user?.role === "purchase_team";
+  const isClient = user?.role === "user";
+
+  // ✅ Supplier approval visible ONLY for admin
+  const isAdminOnly = user?.role === "admin";
 
   const getAdminTab = () => {
     if (typeof window === "undefined") return null;
@@ -143,9 +152,16 @@ export function Sidebar() {
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {/* Dashboard Link - hidden for suppliers */}
-          {user?.role !== 'supplier' && (
+          {user?.role !== "supplier" && (
             <Link href="/dashboard">
-              <span className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", location === "/dashboard" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent") }>
+              <span
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                  location === "/dashboard"
+                    ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                    : "text-sidebar-foreground hover:bg-sidebar-accent"
+                )}
+              >
                 <LayoutDashboard className="h-4 w-4" />
                 Dashboard
               </span>
@@ -157,90 +173,176 @@ export function Sidebar() {
               <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Admin
               </div>
+
               <Link href="/admin/dashboard?tab=materials">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    currentAdminTab === "materials"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
-                  <Package className="h-4 w-4" /> Manage Materials
+                  <Package className="h-4 w-4" /> Item Master
                 </span>
               </Link>
+
               <Link href="/admin/dashboard?tab=shops">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "shops" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    currentAdminTab === "shops"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
                   <Building2 className="h-4 w-4" /> Manage Shops
                 </span>
               </Link>
+
               <Link href="/admin/dashboard?tab=categories">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "categories" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    currentAdminTab === "categories"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
                   <Layers className="h-4 w-4" /> Categories
                 </span>
               </Link>
+
               <Link href="/admin/dashboard?tab=approvals">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    currentAdminTab === "approvals"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
                   <ShieldAlert className="h-4 w-4" /> Shop Approvals
                   {pendingShopCount > 0 && (
-                    <Badge variant="destructive" className="ml-auto">{pendingShopCount}</Badge>
+                    <Badge variant="destructive" className="ml-auto">
+                      {pendingShopCount}
+                    </Badge>
                   )}
                 </span>
               </Link>
+
               <Link href="/admin/dashboard?tab=material-approvals">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", currentAdminTab === "material-approvals" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    currentAdminTab === "material-approvals"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
                   <CheckCircle2 className="h-4 w-4" /> Material Approvals
                   {pendingMaterialCount > 0 && (
-                    <Badge variant="destructive" className="ml-auto">{pendingMaterialCount}</Badge>
+                    <Badge variant="destructive" className="ml-auto">
+                      {pendingMaterialCount}
+                    </Badge>
                   )}
                 </span>
               </Link>
+
               <Link href="/admin/dashboard?tab=messages">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", currentAdminTab === "messages" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    currentAdminTab === "messages"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
                   <MessageSquare className="h-4 w-4" /> Messages
                   {messageCount > 0 && (
-                    <Badge variant="secondary" className="ml-auto">{messageCount}</Badge>
+                    <Badge variant="secondary" className="ml-auto">
+                      {messageCount}
+                    </Badge>
                   )}
                 </span>
               </Link>
+
+              <Link href="/boq-review">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/boq-review"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <ShoppingCart className="h-4 w-4" /> Create BOQ
+                </span>
+              </Link>
+
+              {/* ✅ Supplier Approvals - ONLY ADMIN */}
+              {isAdminOnly && (
+                <Link href="/admin/suppliers">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      location === "/admin/suppliers"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent"
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Users className="h-4 w-4" /> Supplier Approvals
+                  </span>
+                </Link>
+              )}
+
               {/* Material Submissions - HIDDEN */}
             </>
           )}
 
-          {isSupplierOrPurchase && (
+          {user?.role === "supplier" || user?.role === "purchase_team" || user?.role === "admin" ? (
             <>
               <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Supplier
+                {user?.role === "admin" ? "Materials" : "Supplier"}
               </div>
-              <Link href="/supplier/shops">
-                <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer", location === "/supplier/shops" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Building2 className="h-4 w-4" /> Add Shop
-                </span>
-              </Link>
+              {user?.role === "supplier" && (
+                <Link href="/supplier/shops">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      location === "/supplier/shops"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent"
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Building2 className="h-4 w-4" /> Add Shop
+                  </span>
+                </Link>
+              )}
               <Link href="/supplier/materials">
                 <span
-                  className={cn("flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer", location === "/supplier/materials" ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent")}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/supplier/materials"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
+                  )}
                   onClick={() => setIsOpen(false)}
                 >
-                  <Package className="h-4 w-4" /> Material Templates
+                  <Package className="h-4 w-4" /> Manage Materials
                 </span>
               </Link>
             </>
-          )}
+          ) : null}
 
           {/* Estimators Section */}
           {(isClient || isAdminOrSoftware) && (
@@ -290,14 +392,22 @@ export function Sidebar() {
         <div className="border-t border-sidebar-border p-4">
           <div className="flex items-center gap-3 mb-3">
             <div className="h-8 w-8 rounded-full bg-sidebar-primary/20 flex items-center justify-center text-sidebar-primary font-bold">
-              {user?.name?.[0]?.toUpperCase() || "U"}
+              {(user as any)?.fullName?.[0]?.toUpperCase() || (user as any)?.username?.[0]?.toUpperCase() || "U"}
             </div>
             <div className="flex flex-col overflow-hidden">
-              <span className="text-sm font-medium text-sidebar-foreground truncate">{user?.name || "Guest"}</span>
-              <span className="text-xs text-muted-foreground truncate capitalize">{user?.role?.replace('_', ' ') || "Visitor"}</span>
+              <span className="text-sm font-medium text-sidebar-foreground truncate">
+                {(user as any)?.fullName || (user as any)?.username || "Guest"}
+              </span>
+              <span className="text-xs text-muted-foreground truncate capitalize">
+                {user?.role?.replace("_", " ") || "Visitor"}
+              </span>
             </div>
           </div>
-          <Button variant="outline" className="w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
+          <Button
+            variant="outline"
+            className="w-full justify-start text-destructive hover:text-destructive"
+            onClick={handleLogout}
+          >
             <LogOut className="mr-2 h-4 w-4" /> Log Out
           </Button>
         </div>

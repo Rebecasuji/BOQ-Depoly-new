@@ -1,7 +1,10 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,6 +14,12 @@ declare module "http" {
     rawBody: unknown;
   }
 }
+
+// Enable CORS for all routes
+app.use(cors({
+  origin: true, // Allow all origins in development
+  credentials: true
+}));
 
 app.use(
   express.json({
@@ -60,19 +69,35 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Register ALL API routes
   await registerRoutes(httpServer, app);
 
+  // ✅ SPA FALLBACK — THIS IS THE FIX FOR 404
+  // Allows React/Wouter to handle routing
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) {
+      return next();
+    }
+
+    if (process.env.NODE_ENV === "production") {
+      return res.sendFile(
+        path.resolve(process.cwd(), "dist/public/index.html")
+      );
+    }
+
+    // In development, let Vite handle index.html
+    next();
+  });
+
+  // Global error handler
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
     res.status(status).json({ message });
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // Vite (dev) or static (prod)
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -80,18 +105,13 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // Server listen
   const port = parseInt(process.env.PORT || "5000", 10);
-
-  // Listen on 0.0.0.0 to accept both IPv4 and IPv6
-  const host = "0.0.0.0";
+  const host = "localhost";
 
   console.log("[index] About to call httpServer.listen()");
 
-  httpServer.on('error', (err: any) => {
+  httpServer.on("error", (err: any) => {
     console.error("[index] Server error:", err);
   });
 
@@ -99,7 +119,6 @@ app.use((req, res, next) => {
     {
       port,
       host,
-      // reusePort: true, // remove this for Windows
     },
     () => {
       log(`Serving on http://localhost:${port}`);

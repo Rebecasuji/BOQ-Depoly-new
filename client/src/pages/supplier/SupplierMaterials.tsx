@@ -63,13 +63,10 @@ export default function SupplierMaterials() {
   const [templatesSearch, setTemplatesSearch] = useState("");
   // list-only view: show a limited set of templates; use search to find others
 
-  // Supplier Submissions State
-  const [submissions, setSubmissions] = useState<any[]>([]);
-  const [loadingSubmissions, setLoadingSubmissions] = useState(true);
-
   // Categories State
   const [categories, setCategories] = useState<string[]>([]);
   const [subcategories, setSubcategories] = useState<string[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
 
   // Form State
@@ -85,6 +82,7 @@ export default function SupplierMaterials() {
     modelnumber: "",
     category: "",
     subcategory: "",
+    product: "",
     technicalspecification: "",
     dimensions: "",
     finishtype: "",
@@ -94,9 +92,9 @@ export default function SupplierMaterials() {
   // Load material templates on mount
   useEffect(() => {
     loadMaterialTemplates();
-    loadSupplierSubmissions();
     loadShops();
     loadCategories();
+    loadProducts();
   }, []);
 
   const loadMaterialTemplates = async () => {
@@ -117,31 +115,6 @@ export default function SupplierMaterials() {
       });
     } finally {
       setLoadingTemplates(false);
-    }
-  };
-
-  const loadSupplierSubmissions = async () => {
-    try {
-      const token = localStorage.getItem("authToken");
-      console.log('[SupplierMaterials] loadSupplierSubmissions token?', !!token);
-      const response = await fetch("/api/supplier/my-submissions", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('loadSupplierSubmissions failed', response.status, text);
-        toast({ title: 'Error', description: `Failed to load submissions: ${response.status}`, variant: 'destructive' });
-        setSubmissions([]);
-        return;
-      }
-      const data = await response.json();
-      setSubmissions(data.submissions || []);
-    } catch (error) {
-      console.error("Error loading submissions:", error);
-      // This endpoint might not exist yet, so we'll handle the error gracefully
-      setSubmissions([]);
-    } finally {
-      setLoadingSubmissions(false);
     }
   };
 
@@ -189,6 +162,17 @@ export default function SupplierMaterials() {
     }
   };
 
+  const loadProducts = async () => {
+    try {
+      const response = await fetch("/api/products");
+      const data = await response.json();
+      setProducts(data.products || []);
+    } catch (error) {
+      console.error("Error loading products:", error);
+      setProducts([]);
+    }
+  };
+
   const handleSelectTemplate = (template: MaterialTemplate) => {
     setSelectedTemplate(template);
     setFormData({
@@ -198,6 +182,7 @@ export default function SupplierMaterials() {
       modelnumber: "",
       category: template.category || "",
       subcategory: "",
+      product: "",
       technicalspecification: "",
       dimensions: "",
       finishtype: "",
@@ -208,6 +193,13 @@ export default function SupplierMaterials() {
     if (template.category) {
       loadSubcategories(template.category);
     }
+    // Scroll to form after a brief delay to ensure state is updated
+    setTimeout(() => {
+      const formElement = document.getElementById("material-form");
+      if (formElement) {
+        formElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
   };
 
   const handleSubmitMaterial = async (e: React.FormEvent) => {
@@ -235,12 +227,15 @@ export default function SupplierMaterials() {
     try {
       const token = localStorage.getItem("authToken");
       console.log('[SupplierMaterials] submit token?', !!token);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
       const response = await fetch("/api/material-submissions", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : undefined,
-        },
+        headers,
         body: JSON.stringify({
           template_id: selectedTemplate.id,
           shop_id: selectedShop,
@@ -275,15 +270,13 @@ export default function SupplierMaterials() {
         modelnumber: "",
         category: "",
         subcategory: "",
+        product: "",
         technicalspecification: "",
         dimensions: "",
         finishtype: "",
         metaltype: "",
       });
       setSelectedShop("");
-
-      // Reload submissions
-      loadSupplierSubmissions();
     } catch (error) {
       console.error("Error submitting material:", error);
       toast({
@@ -384,7 +377,7 @@ export default function SupplierMaterials() {
 
           {/* Submission Form Section */}
           {selectedTemplate && (
-            <Card className="bg-blue-50 border-blue-200">
+            <Card id="material-form" className="bg-blue-50 border-blue-200 scroll-mt-20">
               <CardHeader>
                 <CardTitle>Submit Material Details</CardTitle>
                 <CardDescription>
@@ -512,7 +505,7 @@ export default function SupplierMaterials() {
                       <Select
                         value={formData.subcategory}
                         onValueChange={(value) =>
-                          setFormData({ ...formData, subcategory: value })
+                          setFormData({ ...formData, subcategory: value, product: "" })
                         }
                         disabled={!formData.category || subcategories.length === 0}
                       >
@@ -525,6 +518,30 @@ export default function SupplierMaterials() {
                               {subcat}
                             </SelectItem>
                           ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label>Product</Label>
+                      <Select
+                        value={formData.product}
+                        onValueChange={(value) =>
+                          setFormData({ ...formData, product: value })
+                        }
+                        disabled={!formData.subcategory || products.length === 0}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder={products.length === 0 ? "No products available" : "Select product"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {products
+                            .filter((product: any) => product.subcategory === formData.subcategory)
+                            .map((product: any) => (
+                              <SelectItem key={product.id} value={product.name}>
+                                {product.name} {"(Subcategory: "}{product.subcategory_name}{")"}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -608,85 +625,6 @@ export default function SupplierMaterials() {
               </CardContent>
             </Card>
           )}
-
-          {/* My Submissions Section */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <CheckCircle2 className="w-5 h-5" />
-              <h2 className="text-2xl font-semibold">My Submissions</h2>
-            </div>
-
-            {loadingSubmissions ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin" />
-              </div>
-            ) : submissions.length === 0 ? (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center text-gray-500">
-                    No submissions yet
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-4">
-                {submissions.map((submission) => (
-                  <Card key={submission.id}>
-                    <CardContent className="pt-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-sm text-gray-600">Material Name</p>
-                          <p className="font-semibold">{submission.template_name}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Status</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            {submission.approved === true ? (
-                              <>
-                                <CheckCircle2 className="w-4 h-4 text-green-600" />
-                                <Badge variant="outline" className="bg-green-50">
-                                  Approved
-                                </Badge>
-                              </>
-                            ) : submission.approved === false ? (
-                              <>
-                                <AlertCircle className="w-4 h-4 text-red-600" />
-                                <Badge variant="outline" className="bg-red-50">
-                                  Rejected
-                                </Badge>
-                              </>
-                            ) : (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-                                <Badge variant="outline" className="bg-yellow-50">
-                                  Pending
-                                </Badge>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Rate</p>
-                          <p className="font-semibold">{submission.rate}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Unit</p>
-                          <p className="font-semibold">{submission.unit}</p>
-                        </div>
-                      </div>
-                      {submission.approval_reason && (
-                        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded">
-                          <p className="text-sm text-red-800">
-                            <strong>Rejection Reason:</strong> {submission.approval_reason}
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
 
           {/* Technical Support Section */}
           <div>

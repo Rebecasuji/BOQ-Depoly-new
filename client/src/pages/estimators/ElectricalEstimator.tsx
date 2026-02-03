@@ -15,13 +15,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useData, Material } from "@/lib/store";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ChevronRight, 
-  ChevronLeft, 
-  Download, 
-  CheckCircle2, 
-  Zap, 
-  Search 
+import {
+  ChevronRight,
+  ChevronLeft,
+  Download,
+  CheckCircle2,
+  Zap,
+  Search
 } from "lucide-react";
 import html2pdf from "html2pdf.js";
 
@@ -32,12 +32,410 @@ interface SelectedMaterialConfig {
   selectedShopId: string;
 }
 
+
+
+type CommonBoqMaterial = {
+  materialName: string;
+  description?: string;
+  quantity: number;
+  supplyRate: number;
+  installRate: number;
+};
+
+type CommonBoqTotals = {
+  subTotal?: number;
+  sgst?: number;
+  cgst?: number;
+  roundOff?: number;
+  grandTotal?: number;
+};
+
+function normalizeNumber(n: any): number {
+  const x = typeof n === "string" ? parseFloat(n) : n;
+  return Number.isFinite(x) ? x : 0;
+}
+
+async function commonApiFetch(path: string, init?: RequestInit) {
+  const res = await fetch(path, {
+    credentials: "include",
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+  });
+  return res;
+}
+
+function CommonBoqFlow(props: {
+  estimator: string;
+  step: number;
+  setStep: (n: number) => void;
+  toast: any;
+  materialsProvider: () => any[];
+  totalsProvider: () => CommonBoqTotals;
+}) {
+  const { estimator, step, setStep, toast, materialsProvider, totalsProvider } = props;
+
+  const [billNo, setBillNo] = useState<string>("");
+  const [savedStep9Materials, setSavedStep9Materials] = useState<CommonBoqMaterial[]>([]);
+  const [manualItems, setManualItems] = useState<CommonBoqMaterial[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const baseMaterials = useMemo(() => {
+    const raw = materialsProvider() || [];
+    return raw
+      .map((r: any) => {
+        const materialName =
+          r.materialName ?? r.name ?? r.material ?? r.itemName ?? r.material_name ?? "";
+        return {
+          materialName: String(materialName || "").trim(),
+          description: r.description ?? r.desc ?? "",
+          quantity: normalizeNumber(r.quantity ?? r.qty),
+          supplyRate: normalizeNumber(r.supplyRate ?? r.supply_rate ?? r.rate ?? 0),
+          installRate: normalizeNumber(r.installRate ?? r.install_rate ?? 0),
+        } as CommonBoqMaterial;
+      })
+      .filter((r: CommonBoqMaterial) => r.materialName);
+  }, [materialsProvider]);
+
+  const totals = useMemo(() => totalsProvider() || {}, [totalsProvider]);
+
+  const loadStep9 = async () => {
+    if (!billNo) {
+      toast?.({
+        title: "Bill No required",
+        description: "Enter Bill No to load Step 9 data.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await commonApiFetch(
+        `/api/estimator-step9-items?session_id=${encodeURIComponent(
+          billNo
+        )}&estimator=${encodeURIComponent(estimator)}`,
+        { method: "GET" }
+      );
+      if (res.status === 401) {
+        toast?.({
+          title: "Unauthorized (401)",
+          description: "Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json().catch(() => ({}));
+      const items = (data?.data || data?.items || []) as any[];
+      setSavedStep9Materials(
+        items.map((r) => ({
+          materialName: r.materialName ?? r.name ?? "",
+          description: r.description ?? "",
+          quantity: normalizeNumber(r.quantity),
+          supplyRate: normalizeNumber(r.supplyRate),
+          installRate: normalizeNumber(r.installRate),
+        }))
+      );
+      toast?.({ title: "Loaded", description: "Step 9 items loaded from DB." });
+    } catch (e: any) {
+      toast?.({
+        title: "Load failed",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveStep9 = async () => {
+    if (!billNo) {
+      toast?.({
+        title: "Bill No required",
+        description: "Enter Bill No to save Step 9 data.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const payload = {
+        estimator,
+        session_id: billNo,
+        items: baseMaterials,
+      };
+      const res = await commonApiFetch("/api/estimator-step9-items", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 401) {
+        toast?.({
+          title: "Unauthorized (401)",
+          description: "Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      toast?.({ title: "Saved", description: "Step 9 items saved to DB." });
+    } catch (e: any) {
+      toast?.({
+        title: "Save failed",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createBoq = async () => {
+    if (!billNo) {
+      toast?.({
+        title: "Bill No required",
+        description: "Enter Bill No before creating BOQ.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setLoading(true);
+      const materials = (savedStep9Materials.length ? savedStep9Materials : baseMaterials).concat(
+        manualItems
+      );
+      const payload: any = {
+        estimator,
+        billNo,
+        materials,
+        subTotal: totals?.subTotal,
+        sgst: totals?.sgst,
+        cgst: totals?.cgst,
+        roundOff: totals?.roundOff,
+        grandTotal: totals?.grandTotal,
+      };
+      const res = await commonApiFetch("/api/boq", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (res.status === 401) {
+        toast?.({
+          title: "Unauthorized (401)",
+          description: "Please login again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(await res.text());
+      toast?.({ title: "BOQ Created", description: "Saved successfully." });
+      setStep(12);
+    } catch (e: any) {
+      toast?.({
+        title: "Create BOQ failed",
+        description: e?.message || String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addManualRow = () => {
+    setManualItems((prev) => [
+      ...prev,
+      { materialName: "", description: "", quantity: 1, supplyRate: 0, installRate: 0 },
+    ]);
+  };
+
+  const updateManualRow = (idx: number, patch: Partial<CommonBoqMaterial>) => {
+    setManualItems((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  };
+
+  const removeManualRow = (idx: number) => {
+    setManualItems((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  if (step === 9) {
+    return (
+      <div className="space-y-4">
+        <div className="text-xl font-semibold">Step 9: BOQ Details</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <div className="text-sm text-muted-foreground mb-1">Bill No (session id)</div>
+            <Input
+              value={billNo}
+              onChange={(e) => setBillNo(e.target.value)}
+              placeholder="Enter Bill No"
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <Button disabled={loading} onClick={loadStep9}>
+              Load
+            </Button>
+            <Button disabled={loading} variant="secondary" onClick={saveStep9}>
+              Save
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setStep(8)}>
+            Back
+          </Button>
+          <Button onClick={() => setStep(10)}>Next</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 10) {
+    return (
+      <div className="space-y-4">
+        <div className="text-xl font-semibold">Step 10: Manual Items</div>
+
+        <div className="flex justify-between items-center">
+          <div className="text-sm text-muted-foreground">
+            Add any extra items before creating BOQ.
+          </div>
+          <Button onClick={addManualRow}>Add Item</Button>
+        </div>
+
+        <div className="overflow-x-auto border rounded-md">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left p-2">Item</th>
+                <th className="text-left p-2">Qty</th>
+                <th className="text-left p-2">Supply</th>
+                <th className="text-left p-2">Install</th>
+                <th className="text-left p-2">Remove</th>
+              </tr>
+            </thead>
+            <tbody>
+              {manualItems.map((r, i) => (
+                <tr key={i} className="border-b">
+                  <td className="p-2">
+                    <Input
+                      value={r.materialName}
+                      onChange={(e) => updateManualRow(i, { materialName: e.target.value })}
+                    />
+                  </td>
+                  <td className="p-2 w-28">
+                    <Input
+                      type="number"
+                      value={r.quantity}
+                      onChange={(e) => updateManualRow(i, { quantity: normalizeNumber(e.target.value) })}
+                    />
+                  </td>
+                  <td className="p-2 w-28">
+                    <Input
+                      type="number"
+                      value={r.supplyRate}
+                      onChange={(e) =>
+                        updateManualRow(i, { supplyRate: normalizeNumber(e.target.value) })
+                      }
+                    />
+                  </td>
+                  <td className="p-2 w-28">
+                    <Input
+                      type="number"
+                      value={r.installRate}
+                      onChange={(e) =>
+                        updateManualRow(i, { installRate: normalizeNumber(e.target.value) })
+                      }
+                    />
+                  </td>
+                  <td className="p-2">
+                    <Button variant="destructive" onClick={() => removeManualRow(i)}>
+                      X
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {manualItems.length === 0 && (
+                <tr>
+                  <td className="p-4 text-muted-foreground" colSpan={5}>
+                    No manual items.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setStep(9)}>
+            Back
+          </Button>
+          <Button onClick={() => setStep(11)}>Next</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === 11) {
+    return (
+      <div className="space-y-4">
+        <div className="text-xl font-semibold">Step 11: Create BOQ</div>
+        <div className="text-sm text-muted-foreground">
+          This step only creates the BOQ in DB. (No extra save button here.)
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setStep(10)}>
+            Back
+          </Button>
+          <Button disabled={loading} onClick={createBoq}>
+            Create BOQ
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xl font-semibold">Step 12: Completed</div>
+      <div className="text-sm text-muted-foreground">
+        BOQ created. You can now proceed to QA / exports as needed.
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={() => setStep(11)}>
+          Back
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function ElectricalEstimator() {
   const { materials: storeMaterials, shops: storeShops } = useData();
-  
+
+  const [showBOQTable, setShowBOQTable] = useState(false);
+
+
   // Navigation & Inputs
   const [step, setStep] = useState(1);
-  const [phaseType, setPhaseType] = useState<"single" | "three" | null>(null);
+  
+  // ------------------- Step 1: Products (DB) -------------------
+  const [products, setProducts] = useState<any[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/products?estimator=electrical`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        const list = data?.data || data?.products || [];
+        if (Array.isArray(list)) setProducts(list);
+      } catch {
+        // non-blocking
+      }
+    })();
+  }, []);
+const [phaseType, setPhaseType] = useState<"single" | "three" | null>(null);
   const [rooms, setRooms] = useState<number>(1);
   const [avgRoomSize, setAvgRoomSize] = useState<number>(120);
   const [pointsPerRoom, setPointsPerRoom] = useState<number>(6);
@@ -59,12 +457,13 @@ export default function ElectricalEstimator() {
   // Material-wise descriptions
   const [materialDescriptions, setMaterialDescriptions] = useState<Record<string, string>>({});
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [materialLocations, setMaterialLocations] = useState<Record<string, string>>({});
 
   // --- LOGIC: FETCH ELECTRICAL MATERIALS ---
   const availableMaterials = useMemo(() => {
     const keywords = ["WIRE", "SWITCH", "SOCKET", "MCB", "CONDUIT", "PVC", "ELECTRICAL", "DB"];
     const normalize = (s: string) => s.toUpperCase();
-    
+
     const candidates = storeMaterials.filter(m => {
       const text = normalize(`${m.name} ${m.category} ${m.subCategory || ""}`);
       return keywords.some(kw => text.includes(kw));
@@ -147,16 +546,27 @@ export default function ElectricalEstimator() {
   const grandTotal = Math.round(totalWithTax);
   const roundOff = grandTotal - totalWithTax;
 
-  const handleExportFinalBOQ = () => {
+  const handleExportFinalBOQ = async () => {
     const element = document.getElementById("boq-final-pdf");
     if (!element) return;
-    html2pdf().set({
-      margin: 0,
-      filename: `Electrical_Invoice_${finalBillNo}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    }).from(element).save();
+
+    try {
+      await html2pdf()
+        .set({
+          margin: [10, 10, 10, 10], // 10mm margin all around
+          filename: `Electrical_Invoice_${finalBillNo}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        })
+        .from(element)
+        .save();
+
+      alert("PDF Downloaded Successfully!");
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to download PDF. Please try again.");
+    }
   };
 
   return (
@@ -173,16 +583,51 @@ export default function ElectricalEstimator() {
         <Card className="border-border/50 min-h-[500px]">
           <CardContent className="pt-8">
             <AnimatePresence mode="wait">
-              
+
               {/* STEPS 1-5 remain unchanged as requested */}
               {step === 1 && (
-                <motion.div key="s1" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                  <Label className="text-lg font-semibold">Select Connection Type</Label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Button variant={phaseType === 'single' ? "default" : "outline"} className="h-24 text-lg" onClick={() => setPhaseType('single')}>Single Phase</Button>
-                    <Button variant={phaseType === 'three' ? "default" : "outline"} className="h-24 text-lg" onClick={() => setPhaseType('three')}>Three Phase</Button>
+                <motion.div
+                  key="step1-products"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-4"
+                >
+                  <div className="text-xl font-semibold">Select Product (from DB)</div>
+                  <div className="text-sm text-muted-foreground">
+                    Choose a product to start the electrical estimate.
                   </div>
-                  <div className="flex justify-end"><Button disabled={!phaseType} onClick={() => setStep(2)}>Next <ChevronRight /></Button></div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {products.map((p, idx) => {
+                      const label = p?.name || p?.title || p?.productName || `Product ${idx + 1}`;
+                      const active = selectedProduct === p;
+                      return (
+                        <Button
+                          key={p?.id || p?._id || label}
+                          variant={active ? "default" : "secondary"}
+                          onClick={() => setSelectedProduct(p)}
+                          className="justify-start"
+                        >
+                          {label}
+                        </Button>
+                      );
+                    })}
+                    {products.length === 0 && (
+                      <div className="text-sm text-muted-foreground">
+                        No products found from DB. (API: /api/products?estimator=electrical)
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      onClick={() => setStep(6)}
+                      disabled={!selectedProduct}
+                    >
+                      Next <ChevronRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
                 </motion.div>
               )}
 
@@ -211,7 +656,7 @@ export default function ElectricalEstimator() {
                     {availableMaterials.filter(m => m.name.toUpperCase().includes(searchTerm.toUpperCase())).map(mat => {
                       const isSelected = selectedMaterials.some(s => s.materialId === mat.id);
                       const current = selectedMaterials.find(s => s.materialId === mat.id);
-                      const shops = storeMaterials.filter(m => m.code === mat.code).sort((a,b) => a.rate - b.rate);
+                      const shops = storeMaterials.filter(m => m.code === mat.code).sort((a, b) => a.rate - b.rate);
 
                       return (
                         <div key={mat.id} className="border rounded-lg p-4 hover:bg-muted/50 flex items-start gap-4">
@@ -222,7 +667,7 @@ export default function ElectricalEstimator() {
                             {isSelected && (
                               <div className="mt-3 space-y-2">
                                 <Label className="text-xs">Select Shop:</Label>
-                                <Select value={current?.selectedShopId} onValueChange={(val) => setSelectedMaterials(p => p.map(s => s.materialId === mat.id ? {...s, selectedShopId: val} : s))}>
+                                <Select value={current?.selectedShopId} onValueChange={(val) => setSelectedMaterials(p => p.map(s => s.materialId === mat.id ? { ...s, selectedShopId: val } : s))}>
                                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                                   <SelectContent>
                                     {shops.map(s => (
@@ -262,10 +707,10 @@ export default function ElectricalEstimator() {
                     <div key={mat.id} className="grid grid-cols-8 gap-2 items-center p-2 border-b">
                       <div className="col-span-2 text-sm font-medium">{mat.name}</div>
                       <div className="text-xs">{mat.id ? (materialDescriptions[mat.id] || mat.name) : mat.name}</div>
-                      <Input type="number" className="h-8" value={editableMaterials[mat.id!]?.quantity} onChange={e => setEditableMaterials(p => ({...p, [mat.id!]: {...p[mat.id!], quantity: Number(e.target.value)}}))} />
+                      <Input type="number" className="h-8" value={editableMaterials[mat.id!]?.quantity} onChange={e => setEditableMaterials(p => ({ ...p, [mat.id!]: { ...p[mat.id!], quantity: Number(e.target.value) } }))} />
                       <div className="text-center text-xs">{mat.unit}</div>
                       <div className="text-center text-xs">{mat.shopName}</div>
-                      <Input type="number" className="h-8" value={editableMaterials[mat.id!]?.rate} onChange={e => setEditableMaterials(p => ({...p, [mat.id!]: {...p[mat.id!], rate: Number(e.target.value)}}))} />
+                      <Input type="number" className="h-8" value={editableMaterials[mat.id!]?.rate} onChange={e => setEditableMaterials(p => ({ ...p, [mat.id!]: { ...p[mat.id!], rate: Number(e.target.value) } }))} />
                       <div className="text-right font-bold">₹{(mat.amount || 0).toFixed(2)}</div>
                     </div>
                   ))}
@@ -278,7 +723,7 @@ export default function ElectricalEstimator() {
 
               {step === 5 && (
                 <motion.div key="s5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                   <div className="text-center space-y-2">
+                  <div className="text-center space-y-2">
                     <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto text-green-600"><CheckCircle2 size={32} /></div>
                     <h2 className="text-2xl font-bold">Bill of Materials (BOM)</h2>
                   </div>
@@ -297,7 +742,7 @@ export default function ElectricalEstimator() {
                       <tbody>
                         {materials.map((m, i) => (
                           <tr key={m.id} className="border">
-                            <td className="p-2 border">{i+1}</td>
+                            <td className="p-2 border">{i + 1}</td>
                             <td className="p-2 border font-medium">{m.name}</td>
                             <td className="p-2 border text-center">{m.quantity} {m.unit}</td>
                             <td className="p-2 border text-right">₹{m.rate}</td>
@@ -310,18 +755,25 @@ export default function ElectricalEstimator() {
 
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setStep(4)}>Back</Button>
-                    <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => setStep(6)}>Finalize BOQ</Button>
+                    <Button
+                      className="bg-indigo-600 hover:bg-indigo-700"
+                      onClick={() => {
+                        setShowBOQTable(true);   // show BOQ table
+                        setStep(6);             // go to finalize step
+                      }}
+                    >
+                      Add to BOQ
+                    </Button>
                   </div>
                 </motion.div>
               )}
 
-              {/* ================= UPDATED STEP 6 (USING STEP 9 LOGIC) ================= */}
-              {step === 6 && (
+{/*              {step === 6 && (
+
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                  
-                  {/* MANUAL INPUTS */}
+
                   <div className="grid grid-cols-3 gap-4">
-                    <div>
+                       <div>
                       <Label>Bill No</Label>
                       <Input value={finalBillNo} onChange={(e) => setFinalBillNo(e.target.value)} />
                     </div>
@@ -351,11 +803,9 @@ export default function ElectricalEstimator() {
                     <Input value={finalTerms} onChange={(e) => setFinalTerms(e.target.value)} />
                   </div>
 
-                  {/* MATERIAL DESCRIPTION INPUT */}
                   <div className="space-y-4 border p-4 rounded-md bg-slate-50">
                     <Label className="font-semibold">Material Description Entry</Label>
 
-                    {/* Material selector */}
                     <select
                       className="w-full border rounded px-3 py-2"
                       value={selectedMaterialId}
@@ -369,7 +819,6 @@ export default function ElectricalEstimator() {
                       ))}
                     </select>
 
-                    {/* Description input */}
                     {selectedMaterialId && (
                       <Input
                         placeholder="Enter description for selected material"
@@ -384,10 +833,8 @@ export default function ElectricalEstimator() {
                     )}
                   </div>
 
-                  {/* PDF CONTAINER */}
                   <div id="boq-final-pdf" style={{ width: "210mm", minHeight: "297mm", padding: "20mm", background: "#fff", color: "#000", fontFamily: "Arial", fontSize: 12 }}>
-                    
-                    {/* HEADER */}
+
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <img src={ctintLogo} alt="Logo" style={{ height: 60 }} />
                       <div style={{ textAlign: "right" }}>
@@ -398,7 +845,6 @@ export default function ElectricalEstimator() {
 
                     <hr style={{ margin: "10px 0", border: "1px solid #000" }} />
 
-                    {/* COMPANY + META */}
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
                       <div style={{ width: "55%", lineHeight: 1.5 }}>
                         <strong>Concept Trunk Interiors</strong><br />
@@ -417,7 +863,6 @@ export default function ElectricalEstimator() {
                       </div>
                     </div>
 
-                    {/* TABLE */}
                     <table style={{ width: "100%", marginTop: 20, borderCollapse: "collapse" }}>
                       <thead>
                         <tr>
@@ -443,7 +888,6 @@ export default function ElectricalEstimator() {
                       </tbody>
                     </table>
 
-                    {/* TOTALS */}
                     <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
                       <table style={{ width: 300, borderCollapse: "collapse" }}>
                         <tbody>
@@ -459,7 +903,6 @@ export default function ElectricalEstimator() {
                       </table>
                     </div>
 
-                    {/* SIGNATURE */}
                     <div style={{ marginTop: 50 }}>
                       <div style={{ width: 200, borderTop: "1px solid #000" }} />
                       <div style={{ fontWeight: "bold", fontSize: 10, marginTop: 4 }}>Authorized Signature</div>
@@ -469,11 +912,136 @@ export default function ElectricalEstimator() {
                   <div className="flex justify-end gap-2">
                     <Button onClick={() => setStep(5)} variant="outline">Back</Button>
                     <Button onClick={handleExportFinalBOQ} className="bg-green-600 hover:bg-green-700">Export PDF</Button>
+                    
                   </div>
+                  </motion.div>
+              )}
+*/}
+                  {step === 6 && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+
+                      <h2 className="text-xl font-bold text-center">BOQ Table</h2>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse border border-slate-300 text-sm">
+                          <thead className="bg-slate-100 font-bold text-[11px]">
+                            <tr>
+                              <th className="border p-2" rowSpan={2}>S.No</th>
+                              <th className="border p-2" rowSpan={2}>Item</th>
+                              <th className="border p-2" rowSpan={2}>Location</th>
+                              <th className="border p-2" rowSpan={2}>Description</th>
+                              <th className="border p-2 text-center" rowSpan={2}>Unit</th>
+                              <th className="border p-2 text-center" rowSpan={2}>Qty</th>
+                              <th className="border p-2 text-center" colSpan={2}>Rate (₹)</th>
+                              <th className="border p-2 text-center" colSpan={2}>Amount (₹)</th>
+                            </tr>
+                            <tr>
+                              <th className="border p-2 text-right">Supply</th>
+                              <th className="border p-2 text-right">Installation</th>
+                              <th className="border p-2 text-right">Supply</th>
+                              <th className="border p-2 text-right">Installation</th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {materials.map((m, i) => {
+                              const supplyRate = m.rate; // Supply rate
+                              const installationRate = 0; // Installation rate (editable if needed)
+                              const supplyAmount = (m.quantity || 0) * supplyRate;
+                              const installationAmount = (m.quantity || 0) * installationRate;
+
+                              return (
+                                <tr key={m.id}>
+                                  <td className="border p-2 text-center">{i + 1}</td>
+                                  <td className="border p-2">{m.name}</td>
+
+                                  {/* Editable Location */}
+                                  <td className="border p-1">
+                                    <Input
+                                      className="h-8 text-xs"
+                                      value={materialLocations[m.id!] || ""}
+                                      placeholder="Enter location"
+                                      onChange={(e) =>
+                                        setMaterialLocations((prev) => ({
+                                          ...prev,
+                                          [m.id!]: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </td>
+
+                                  {/* Editable Description */}
+                                  <td className="border p-1">
+                                    <Input
+                                      className="h-8 text-xs"
+                                      value={materialDescriptions[m.id!] || ""}
+                                      placeholder="Enter description"
+                                      onChange={(e) =>
+                                        setMaterialDescriptions((prev) => ({
+                                          ...prev,
+                                          [m.id!]: e.target.value,
+                                        }))
+                                      }
+                                    />
+                                  </td>
+
+                                  <td className="border p-2 text-center">{m.unit}</td>
+                                  <td className="border p-2 text-center">{m.quantity}</td>
+
+                                  {/* Rate */}
+                                  <td className="border p-2 text-right">{Number(supplyRate).toFixed(2)}</td>
+                                  <td className="border p-2 text-right">{Number(installationRate).toFixed(2)}</td>
+
+                                  {/* Amount */}
+                                  <td className="border p-2 text-right font-semibold">₹{supplyAmount.toFixed(2)}</td>
+                                  <td className="border p-2 text-right font-semibold">₹{installationAmount.toFixed(2)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Buttons */}
+                      <div className="flex justify-end pt-6 gap-2">
+                        <Button variant="outline" onClick={() => setStep(5)}>
+                          Back
+                        </Button>
+
+                        <Button
+                          className="bg-yellow-500 text-white opacity-100 cursor-not-allowed hover:bg-yellow-600"
+                          onClick={() => { }}
+                        >
+                          Finalize BOQ
+                        </Button>
+
+                        <Button>
+                          <Download className="w-4 h-4 mr-1" /> Export PDF
+                        </Button>
+
+                      </div>
+                    </motion.div>
+                  )}
+                
+            
+              {step >= 9 && step <= 12 && (
+                <motion.div
+                  key="common-boq-flow"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <CommonBoqFlow
+                    estimator="electrical"
+                    step={step}
+                    setStep={setStep}
+                    toast={toast}
+                    materialsProvider={() => (selectedMaterials || []).map((m: any) => { const key = (m.materialName ?? m.name ?? m.id ?? m.material ?? m.material?.name ?? '').toString(); const e = (editableMaterials as any)[key] || (editableMaterials as any)[m.materialName] || {}; return { materialName: key, description: m.description || '', quantity: (e.quantity ?? m.quantity ?? 0), supplyRate: (e.supplyRate ?? m.supplyRate ?? 0), installRate: (e.installRate ?? m.installRate ?? 0) }; })}
+                    totalsProvider={() => { subTotal, sgst, cgst, roundOff, grandTotal }}
+                  />
                 </motion.div>
               )}
-
-            </AnimatePresence>
+</AnimatePresence>
           </CardContent>
         </Card>
       </div>

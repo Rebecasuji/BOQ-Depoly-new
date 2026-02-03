@@ -5,7 +5,8 @@ export type Role = "admin" | "supplier" | "user" | "purchase_team" | "software_t
 
 export interface User { id: string; name?: string; email?: string; role: Role; shopId?: string }
 export interface Shop { id: string; name: string; location?: string; phoneCountryCode?: string; contactNumber?: string; city?: string; state?: string; country?: string; pincode?: string; image?: string; rating?: number; categories?: string[]; gstNo?: string; ownerId?: string; disabled?: boolean }
-export interface Material { id: string; name: string; code: string; rate: number; shopId?: string; unit?: string; category?: string; brandName?: string; modelNumber?: string; subCategory?: string; technicalSpecification?: string; image?: string; attributes?: any; disabled?: boolean }
+export interface Material { id: string; name: string; code: string; rate: number; shopId?: string; unit?: string; category?: string; brandName?: string; modelNumber?: string; subCategory?: string; product?: string; technicalSpecification?: string; dimensions?: string; finish?: string; metalType?: string; image?: string; attributes?: any; masterMaterialId?: string; disabled?: boolean }
+export interface Product { id: string; name: string; subcategory?: string; category?: string; subcategory_name?: string; category_name?: string; created_at?: string; created_by?: string }
 
 interface DataContextType {
   user: User | null;
@@ -13,6 +14,7 @@ interface DataContextType {
   logout: () => void;
   shops: Shop[];
   materials: Material[];
+  products: Product[];
   approvalRequests?: any[];
   supportMessages?: any[];
   pendingShops?: any[];
@@ -38,6 +40,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [approvalRequests, setApprovalRequests] = useState<any[]>([]);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [pendingShops, setPendingShops] = useState<any[]>(() => {
@@ -50,6 +53,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [flushAttemptCount, setFlushAttemptCount] = useState(0);
   const [lastFlushTime, setLastFlushTime] = useState(0);
 
+  // Helper function to normalize server material keys (snake_case) to client camelCase
+  const normalizeMaterial = (mat: any) => ({
+    id: mat.id,
+    name: mat.name,
+    code: mat.code,
+    rate: mat.rate,
+    shopId: mat.shop_id || mat.shopId || null,
+    unit: mat.unit,
+    category: mat.category,
+    brandName: mat.brandname || mat.brandName || "",
+    modelNumber: mat.modelnumber || mat.modelNumber || "",
+    subCategory: mat.subcategory || mat.subCategory || "",
+    product: mat.product || "",
+    technicalSpecification: mat.technicalspecification || mat.technicalSpecification || "",
+    image: mat.image,
+    attributes: mat.attributes || {},
+    disabled: mat.disabled || false,
+  } as Material);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -60,26 +82,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       try {
         const m = await getJSON('/materials');
         if (mounted && m?.materials) {
-          // normalize server material keys (snake_case) to client camelCase
-          const normalize = (mat: any) => ({
-            id: mat.id,
-            name: mat.name,
-            code: mat.code,
-            rate: mat.rate,
-            shopId: mat.shop_id || mat.shopId || null,
-            unit: mat.unit,
-            category: mat.category,
-            brandName: mat.brandname || mat.brandName || "",
-            modelNumber: mat.modelnumber || mat.modelNumber || "",
-            subCategory: mat.subcategory || mat.subCategory || "",
-            technicalSpecification: mat.technicalspecification || mat.technicalSpecification || "",
-            image: mat.image,
-            attributes: mat.attributes || {},
-            disabled: mat.disabled || false,
-          });
-          setMaterials(m.materials.map(normalize));
+          setMaterials(m.materials.map(normalizeMaterial));
         }
       } catch (e) { console.warn('load materials failed', e); }
+      try {
+        const p = await getJSON('/products');
+        if (mounted && p?.products) setProducts(p.products);
+      } catch (e) { console.warn('load products failed', e); }
       // load server-side pending approval lists into central state
       try {
         const ps = await getJSON('/shops-pending-approval');
@@ -191,23 +200,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const data = await postJSON('/materials', mat);
     if (data?.material) {
       // normalize server material
-      const matSrv = data.material;
-      const normalized = {
-        id: matSrv.id,
-        name: matSrv.name,
-        code: matSrv.code,
-        rate: matSrv.rate,
-        shopId: matSrv.shop_id || matSrv.shopId || null,
-        unit: matSrv.unit,
-        category: matSrv.category,
-        brandName: matSrv.brandname || matSrv.brandName || "",
-        modelNumber: matSrv.modelnumber || matSrv.modelNumber || "",
-        subCategory: matSrv.subcategory || matSrv.subCategory || "",
-        technicalSpecification: matSrv.technicalspecification || matSrv.technicalSpecification || "",
-        image: matSrv.image,
-        attributes: matSrv.attributes || {},
-        disabled: matSrv.disabled || false,
-      } as Material;
+      const normalized = normalizeMaterial(data.material);
       setMaterials((p) => [normalized, ...p]);
       return data.material;
     }
@@ -274,7 +267,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       console.warn('[deleteMaterial] exception:', e);
     }
     console.log('[deleteMaterial] re-syncing from server');
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('refresh materials failed', e); }
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('refresh materials failed', e); }
   };
 
   const approveShop = async (id: string) => {
@@ -291,13 +284,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const approveMaterial = async (id: string) => {
     const data = await postJSON(`/materials/${id}/approve`, {});
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('approveMaterial refresh failed', e); }
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('approveMaterial refresh failed', e); }
     return data?.material;
   };
 
   const rejectMaterial = async (id: string, reason?: string|null) => {
     const data = await postJSON(`/materials/${id}/reject`, { reason });
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials); } catch (e) { console.warn('rejectMaterial refresh failed', e); }
+    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('rejectMaterial refresh failed', e); }
     return data?.material;
   };
 
@@ -337,6 +330,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     logout,
     shops,
     materials,
+    products,
     approvalRequests,
     supportMessages,
     pendingShops,
