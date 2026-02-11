@@ -144,7 +144,10 @@ export default function AdminDashboard() {
         const res = await fetch('/api/products');
         if (res.ok) {
           const data = await res.json();
-          if (data?.products) setProducts(data.products);
+          if (data?.products) {
+            const mapped = data.products.map((p: any) => mapProduct(p));
+            setProducts(mapped);
+          }
         }
       } catch (e) {
         console.warn('load products failed', e);
@@ -152,14 +155,27 @@ export default function AdminDashboard() {
     })();
   }, []);
 
+  // normalize product object from server (snake_case) to camelCase
+  const mapProduct = (p: any) => ({
+    ...p,
+    taxCodeType: p.taxCodeType ?? p.tax_code_type ?? null,
+    taxCodeValue: p.taxCodeValue ?? p.tax_code_value ?? "",
+  });
+
   // NEW CATEGORY/SUBCATEGORY INPUT
   const [newCategory, setNewCategory] = useState("");
   const [newSubCategory, setNewSubCategory] = useState("");
   const [selectedCategoryForSubCategory, setSelectedCategoryForSubCategory] = useState("");
 
+  // EDITING SUBCATEGORY STATE
+  const [editingSubCategoryId, setEditingSubCategoryId] = useState<string | null>(null);
+  const [editingSubCategoryName, setEditingSubCategoryName] = useState("");
+  const [editingSubCategoryCategory, setEditingSubCategoryCategory] = useState("");
+
   // PRODUCTS STATE
   const [products, setProducts] = useState<any[]>([]);
-  const [newProduct, setNewProduct] = useState({ name: "", subcategory: "" });
+  const [newProduct, setNewProduct] = useState({ name: "", subcategory: "", taxCodeType: null as 'hsn' | 'sac' | null, taxCodeValue: "", hsnCode: "", sacCode: "" });
+  const [showAddSubInline, setShowAddSubInline] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
   const [searchCategories, setSearchCategories] = useState("");
   const [searchSubCategories, setSearchSubCategories] = useState("");
@@ -230,7 +246,7 @@ export default function AdminDashboard() {
       });
 
       const newSub = {
-        id: Math.random().toString(),
+        id: res.subcategory.id,
         name: newSubCategory,
         category: selectedCategoryForSubCategory,
         createdAt: new Date().toISOString(),
@@ -277,15 +293,24 @@ export default function AdminDashboard() {
       return;
     }
 
+
     try {
-      const res = await postJSON('/products', newProduct);
+      // Build payload: include HSN and SAC as separate fields if provided.
+      const payload: any = {
+        name: newProduct.name,
+        subcategory: newProduct.subcategory,
+      };
+      if (newProduct.hsnCode && newProduct.hsnCode.trim()) payload.hsn_code = newProduct.hsnCode.trim();
+      if (newProduct.sacCode && newProduct.sacCode.trim()) payload.sac_code = newProduct.sacCode.trim();
+
+      const res = await postJSON('/products', payload);
       const newProd = res.product || res;
-      setProducts((prev: any[]) => [...prev, newProd]);
+      setProducts((prev: any[]) => [...prev, mapProduct(newProd)]);
       toast({
         title: "Success",
         description: `Product "${newProduct.name}" created`,
       });
-      setNewProduct({ name: "", subcategory: "" });
+      setNewProduct({ name: "", subcategory: "", taxCodeType: null, taxCodeValue: "", hsnCode: "", sacCode: "" });
     } catch (err: any) {
       console.error('add product error', err);
       toast({
@@ -316,6 +341,11 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (editingProduct.taxCodeType && !editingProduct.taxCodeValue?.trim()) {
+      toast({ title: "Error", description: "Tax code value is required", variant: "destructive" });
+      return;
+    }
+
     try {
       const res = await apiFetch(`/products/${editingProduct.id}`, {
         method: 'PUT',
@@ -323,7 +353,8 @@ export default function AdminDashboard() {
       });
 
       const updated = await res.json();
-      setProducts((prev: any[]) => prev.map((p: any) => p.id === editingProduct.id ? updated.product || updated : p));
+      const updatedProd = mapProduct(updated.product || updated);
+      setProducts((prev: any[]) => prev.map((p: any) => p.id === editingProduct.id ? updatedProd : p));
       toast({
         title: "Success",
         description: `Product "${editingProduct.name}" updated`,
@@ -422,7 +453,7 @@ export default function AdminDashboard() {
         if (response.ok) {
           const data = await response.json();
           // Transform the response to match material request format
-          const submissions = (data.submissions || []).map((s: any) => ({
+            const submissions = (data.submissions || []).map((s: any) => ({
             id: s.submission.id,
             status: "pending",
             source: 'submission',
@@ -432,11 +463,11 @@ export default function AdminDashboard() {
               code: s.submission.template_code || "",
               rate: s.submission.rate,
               unit: s.submission.unit,
-              category: "",
-              subCategory: s.submission.subcategory,
-              brandName: s.submission.brandname,
-              modelNumber: s.submission.modelnumber,
-              technicalSpecification: s.submission.technicalspecification,
+              category: s.submission.category || s.submission.template_category || s.submission.template_category_name || "",
+              subCategory: s.submission.subcategory || s.submission.sub_category || "",
+              brandName: s.submission.brandname || s.submission.brandName || s.submission.brand || s.submission.make || "",
+              modelNumber: s.submission.modelnumber || s.submission.modelNumber || "",
+              technicalSpecification: s.submission.technicalspecification || s.submission.technicalSpecification || "",
             },
             submittedBy: s.submission.shop_name || "Supplier",
             submittedAt: s.submission.created_at,
@@ -530,9 +561,15 @@ export default function AdminDashboard() {
   const [newMasterMaterial, setNewMasterMaterial] = useState<{
     name: string;
     code: string;
+    vendorCategory: string;
+    taxCodeType: 'hsn' | 'sac' | null;
+    taxCodeValue: string;
   }>({
     name: "",
     code: "",
+    vendorCategory: "",
+    taxCodeType: null,
+    taxCodeValue: "",
   });
 
   // Auto-generate code when admin enters material name
@@ -561,6 +598,9 @@ export default function AdminDashboard() {
       const payload: any = {
         name: newMasterMaterial.name.trim(),
         code: newMasterMaterial.code,
+        vendorCategory: newMasterMaterial.vendorCategory.trim(),
+        taxCodeType: newMasterMaterial.taxCodeType,
+        taxCodeValue: newMasterMaterial.taxCodeValue.trim(),
       };
 
       const res = await postJSON('/material-templates', payload);
@@ -573,7 +613,13 @@ export default function AdminDashboard() {
         description: "Master material created. Suppliers can now use this.",
       });
 
-      setNewMasterMaterial({ name: "", code: "" });
+      setNewMasterMaterial({ 
+        name: "", 
+        code: "", 
+        vendorCategory: "", 
+        taxCodeType: null, 
+        taxCodeValue: "" 
+      });
     } catch (err: any) {
       console.error('create master material error', err);
       toast({
@@ -667,7 +713,7 @@ export default function AdminDashboard() {
       name: "",
       code: "",
       rate: 0,
-      unit: "pcs",
+      unit: "pcs",            
       category: "",
       subCategory: "",
       product: "",
@@ -757,6 +803,7 @@ export default function AdminDashboard() {
     pincode: "",
     phoneCountryCode: "+91",
     gstNo: "",
+    vendorCategory: "",
     rating: 5,
   });
 
@@ -846,6 +893,7 @@ export default function AdminDashboard() {
           country: "",
           pincode: "",
           gstNo: "",
+          vendorCategory: "",
         });
         setEditingShopId(null);
       }
@@ -863,6 +911,7 @@ export default function AdminDashboard() {
       pincode: shop.pincode,
       phoneCountryCode: shop.phoneCountryCode || "+91",
       gstNo: shop.gstNo || "",
+      vendorCategory: shop.vendorCategory || "",
       rating: shop.rating || 5,
     });
     // open shops tab
@@ -1036,14 +1085,20 @@ export default function AdminDashboard() {
     user?.role === "admin" || user?.role === "software_team";
 
   const canViewCategories =
-    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team";
+    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team" || user?.role === "pre_sales";
 
   const canManageCategories =
-    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team";
+    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team" || user?.role === "pre_sales";
 
-  // Permission for viewing all tabs but no edit/delete for purchase_team
+  const canCreateProduct = canManageCategories || user?.role === "pre_sales";
+
+  // Allow presales users to manage products and subcategories (but not top-level categories)
+  const canManageProducts = canManageCategories || user?.role === "pre_sales";
+  const canManageSubcategories = canManageCategories || user?.role === "pre_sales";
+
+  // Permission for viewing all tabs and edit/delete for admin, software_team, and purchase_team
   const canEditDelete =
-    user?.role === "admin" || user?.role === "software_team";
+    user?.role === "admin" || user?.role === "software_team" || user?.role === "purchase_team";
 
   // Permission for approve/reject - Admin, Software Team, and Purchase Team
   const canApproveReject =
@@ -1416,7 +1471,7 @@ export default function AdminDashboard() {
                       <CardTitle className="text-purple-900">Create Categories</CardTitle>
                       <CardDescription className="text-purple-800">Add new product categories</CardDescription>
                     </div>
-                    {canManageCategories && (
+                    {canCreateProduct && (<>
                       <Dialog>
                         <DialogTrigger asChild>
                           <Button className="bg-purple-600 hover:bg-purple-700">
@@ -1445,10 +1500,37 @@ export default function AdminDashboard() {
                           </div>
                         </DialogContent>
                       </Dialog>
-                    )}
+                    </>)}
                   </div>
                 </CardHeader>
                 <CardContent>
+                  {showAddSubInline && (
+                    <div className="space-y-2 p-3 border rounded mb-4 bg-white">
+                      <Label>Select Category <Required /></Label>
+                      <Select
+                        value={selectedCategoryForSubCategory}
+                        onValueChange={setSelectedCategoryForSubCategory}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose a category..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-44">
+                          {categories.length === 0 ? (
+                            <div className="p-2 text-sm text-muted-foreground">No categories available</div>
+                          ) : (
+                            categories.map((cat: string) => (
+                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <div className="space-y-2">
+                        <Label>Subcategory Name <Required /></Label>
+                        <Input value={newSubCategory} onChange={(e) => setNewSubCategory(e.target.value)} placeholder="e.g. Commercial, Residential" />
+                      </div>
+                      <Button onClick={async () => { await handleAddSubCategory(); if (newSubCategory.trim()) { setShowAddSubInline(false); } }} className="bg-green-600 hover:bg-green-700">Add Subcategory</Button>
+                    </div>
+                  )}
                   <div className="mb-4">
                     <Input
                       value={searchCategories}
@@ -1557,7 +1639,7 @@ export default function AdminDashboard() {
                       <CardTitle className="text-green-900">Create Subcategories</CardTitle>
                       <CardDescription className="text-green-800">Add subcategories to your categories</CardDescription>
                     </div>
-                    {canManageCategories && (
+                    {canCreateProduct && (<>
                       <Dialog>
                         <DialogTrigger asChild>
                           <Button className="bg-green-600 hover:bg-green-700">
@@ -1566,7 +1648,7 @@ export default function AdminDashboard() {
                         </DialogTrigger>
                         <DialogContent>
                           <DialogHeader>
-                            <DialogTitle>Add New Subcategory</DialogTitle>
+                            <DialogTitle></DialogTitle>
                           </DialogHeader>
                           <div className="space-y-4">
                             <div className="space-y-2">
@@ -1607,8 +1689,9 @@ export default function AdminDashboard() {
                             </Button>
                           </div>
                         </DialogContent>
-                      </Dialog>
-                    )}
+                        </Dialog>
+                       
+                      </>)}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -1637,11 +1720,12 @@ export default function AdminDashboard() {
                                   </span>
                                 </div>
                               </div>
-                              {canManageCategories && (
+                              {canManageSubcategories && (
                                 <div className="flex gap-2">
                                   <Button size="sm" variant="outline" onClick={() => {
-                                    setEditingCategory(sub.id);
-                                    setEditingCategoryValue(sub.name);
+                                    setEditingSubCategoryId(sub.id);
+                                    setEditingSubCategoryName(sub.name);
+                                    setEditingSubCategoryCategory(sub.category);
                                   }}>
                                     Edit
                                   </Button>
@@ -1664,31 +1748,57 @@ export default function AdminDashboard() {
                                   </Button>
                                 </div>
                               )}
-                              {editingCategory === sub.id && (
-                                <div className="mt-3 p-3 bg-gray-100 rounded border col-span-full">
-                                  <div className="flex gap-2">
+                              {editingSubCategoryId === sub.id && (
+                                <div className="mt-3 p-3 bg-gray-100 rounded border col-span-full w-full space-y-3">
+                                  <div>
+                                    <Label className="text-sm">Category</Label>
+                                    <Select
+                                      value={editingSubCategoryCategory}
+                                      onValueChange={setEditingSubCategoryCategory}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Choose a category..." />
+                                      </SelectTrigger>
+                                      <SelectContent className="max-h-64">
+                                        {categories.map((cat: string) => (
+                                          <SelectItem key={cat} value={cat}>
+                                            {cat}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="text-sm">Subcategory Name</Label>
                                     <Input
-                                      value={editingCategoryValue}
-                                      onChange={(e) => setEditingCategoryValue(e.target.value)}
+                                      value={editingSubCategoryName}
+                                      onChange={(e) => setEditingSubCategoryName(e.target.value)}
                                       placeholder="Subcategory name"
                                       className="text-sm"
                                     />
+                                  </div>
+                                  <div className="flex gap-2">
                                     <Button size="sm" onClick={async () => {
-                                      const newName = editingCategoryValue.trim();
+                                      const newName = editingSubCategoryName.trim();
                                       if (!newName) {
                                         toast({ title: 'Error', description: 'Subcategory name cannot be empty', variant: 'destructive' });
+                                        return;
+                                      }
+                                      if (!editingSubCategoryCategory) {
+                                        toast({ title: 'Error', description: 'Please select a category', variant: 'destructive' });
                                         return;
                                       }
                                       try {
                                         const res = await apiFetch(`/subcategories/${sub.id}`, {
                                           method: 'PUT',
-                                          body: JSON.stringify({ name: newName, category: sub.category }),
+                                          body: JSON.stringify({ name: newName, category: editingSubCategoryCategory }),
                                         });
                                         if (res.ok) {
-                                          setSubCategories(prev => prev.map(s => s.id === sub.id ? { ...s, name: newName } : s));
-                                          setEditingCategory(null);
-                                          setEditingCategoryValue("");
-                                          toast({ title: 'Success', description: `Subcategory updated to ${newName}` });
+                                          setSubCategories(prev => prev.map(s => s.id === sub.id ? { ...s, name: newName, category: editingSubCategoryCategory } : s));
+                                          setEditingSubCategoryId(null);
+                                          setEditingSubCategoryName("");
+                                          setEditingSubCategoryCategory("");
+                                          toast({ title: 'Success', description: `Subcategory updated` });
                                         }
                                       } catch (err) {
                                         console.error('update subcategory error', err);
@@ -1696,8 +1806,9 @@ export default function AdminDashboard() {
                                       }
                                     }}>Save</Button>
                                     <Button size="sm" variant="ghost" onClick={() => {
-                                      setEditingCategory(null);
-                                      setEditingCategoryValue("");
+                                      setEditingSubCategoryId(null);
+                                      setEditingSubCategoryName("");
+                                      setEditingSubCategoryCategory("");
                                     }}>Cancel</Button>
                                   </div>
                                 </div>
@@ -1718,7 +1829,7 @@ export default function AdminDashboard() {
                       <CardTitle className="text-blue-900">Create Products</CardTitle>
                       <CardDescription className="text-blue-800">Add new products and assign subcategories</CardDescription>
                     </div>
-                    {canManageCategories && (
+                    {canCreateProduct && (<>
                       <Dialog>
                         <DialogTrigger asChild>
                           <Button className="bg-blue-600 hover:bg-blue-700">
@@ -1764,6 +1875,64 @@ export default function AdminDashboard() {
                                 </SelectContent>
                               </Select>
                             </div>
+                            {/*
+<div className="flex items-center justify-between">
+  <small className="text-xs text-muted-foreground"></small>
+  <Button
+    size="sm"
+    variant="ghost"
+    onClick={() => setShowAddSubInline(prev => !prev)}
+  >
+    {showAddSubInline ? 'Cancel' : ''}
+  </Button>
+</div>
+*/}
+
+                            {showAddSubInline && (
+                              <div className="space-y-2 p-3 border rounded">
+                                <Label>Select Category <Required /></Label>
+                                <Select
+                                  value={selectedCategoryForSubCategory}
+                                  onValueChange={setSelectedCategoryForSubCategory}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Choose a category..." />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-44">
+                                    {categories.length === 0 ? (
+                                      <div className="p-2 text-sm text-muted-foreground">No categories available</div>
+                                    ) : (
+                                      categories.map((cat: string) => (
+                                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                                      ))
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                                <div className="space-y-2">
+                                  <Label>Subcategory Name <Required /></Label>
+                                  <Input value={newSubCategory} onChange={(e) => setNewSubCategory(e.target.value)} placeholder="e.g. Commercial, Residential" />
+                                </div>
+                                <Button onClick={async () => {
+                                  await handleAddSubCategory();
+                                  // if created, set it as selected in product select
+                                  if (newSubCategory.trim()) {
+                                    setNewProduct(prev => ({ ...prev, subcategory: newSubCategory.trim() }));
+                                    setShowAddSubInline(false);
+                                  }
+                                }} className="w-full bg-green-600 hover:bg-green-700">Add Subcategory</Button>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label>HSN Code</Label>
+                                <Input value={newProduct.hsnCode} onChange={(e) => setNewProduct({ ...newProduct, hsnCode: e.target.value })} placeholder="Enter HSN code" />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>SAC Code</Label>
+                                <Input value={newProduct.sacCode} onChange={(e) => setNewProduct({ ...newProduct, sacCode: e.target.value })} placeholder="Enter SAC code" />
+                              </div>
+                            </div>
                             <Button
                               onClick={handleAddProduct}
                               className="w-full bg-blue-600 hover:bg-blue-700"
@@ -1773,7 +1942,7 @@ export default function AdminDashboard() {
                           </div>
                         </DialogContent>
                       </Dialog>
-                    )}
+                    </>)}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -1800,12 +1969,17 @@ export default function AdminDashboard() {
                                   <span className="text-sm text-muted-foreground">
                                     Subcategories: {product.subcategory || "-"}
                                   </span>
+                                  {product.taxCodeType && product.taxCodeValue && (
+                                    <div className="text-sm text-muted-foreground mt-1">
+                                      {product.taxCodeType.toUpperCase()}: {product.taxCodeValue}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                              {canManageCategories && (
+                              {canManageProducts && (
                                 <div className="flex gap-2">
                                   <Button size="sm" variant="outline" onClick={() => {
-                                    setEditingProduct(product);
+                                    setEditingProduct(mapProduct(product));
                                   }}>
                                     Edit
                                   </Button>
@@ -1860,6 +2034,41 @@ export default function AdminDashboard() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div className="space-y-2">
+                        <Label>Tax Code Type</Label>
+                        <div className="flex gap-4 mt-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              id="edit-hsn"
+                              name="editProductTaxCodeType"
+                              value="hsn"
+                              checked={editingProduct.taxCodeType === 'hsn'}
+                              onChange={(e) => setEditingProduct((prev: any) => ({ ...prev, taxCodeType: e.target.value as 'hsn' | 'sac' }))}
+                              className="w-4 h-4"
+                            />
+                            <Label htmlFor="edit-hsn" className="cursor-pointer mb-0">HSN Code</Label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              id="edit-sac"
+                              name="editProductTaxCodeType"
+                              value="sac"
+                              checked={editingProduct.taxCodeType === 'sac'}
+                              onChange={(e) => setEditingProduct((prev: any) => ({ ...prev, taxCodeType: e.target.value as 'hsn' | 'sac' }))}
+                              className="w-4 h-4"
+                            />
+                            <Label htmlFor="edit-sac" className="cursor-pointer mb-0">SAC Code</Label>
+                          </div>
+                        </div>
+                      </div>
+                      {editingProduct.taxCodeType && (
+                        <div className="space-y-2">
+                          <Label>{editingProduct.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} Code</Label>
+                          <Input value={editingProduct.taxCodeValue || ''} onChange={(e) => setEditingProduct((prev: any) => ({ ...prev, taxCodeValue: e.target.value }))} placeholder={`Enter ${editingProduct.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} code`} />
+                        </div>
+                      )}
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" onClick={() => setEditingProduct(null)}>
                           Cancel
@@ -1935,13 +2144,89 @@ export default function AdminDashboard() {
                         </p>
                       )}
                     </div>
+                    <div className="space-y-2">
+                      <Label>
+                        Vendor Category
+                      </Label>
+                      <Input
+                        value={newMasterMaterial.vendorCategory}
+                        onChange={(e) =>
+                          setNewMasterMaterial({
+                            ...newMasterMaterial,
+                            vendorCategory: e.target.value,
+                          })
+                        }
+                        placeholder="Enter vendor category"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tax Code Type</Label>
+                      <div className="flex gap-4 mt-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            id="hsn"
+                            name="taxCodeType"
+                            value="hsn"
+                            checked={newMasterMaterial.taxCodeType === 'hsn'}
+                            onChange={(e) =>
+                              setNewMasterMaterial({
+                                ...newMasterMaterial,
+                                taxCodeType: e.target.value as 'hsn' | 'sac',
+                              })
+                            }
+                            className="w-4 h-4"
+                          />
+                          <Label htmlFor="hsn" className="cursor-pointer mb-0">
+                            HSN Code
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            id="sac"
+                            name="taxCodeType"
+                            value="sac"
+                            checked={newMasterMaterial.taxCodeType === 'sac'}
+                            onChange={(e) =>
+                              setNewMasterMaterial({
+                                ...newMasterMaterial,
+                                taxCodeType: e.target.value as 'hsn' | 'sac',
+                              })
+                            }
+                            className="w-4 h-4"
+                          />
+                          <Label htmlFor="sac" className="cursor-pointer mb-0">
+                            SAC Code
+                          </Label>
+                        </div>
+                      </div>
+                    </div>
+                    {newMasterMaterial.taxCodeType && (
+                      <div className="space-y-2">
+                        <Label>
+                          {newMasterMaterial.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} Code <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          value={newMasterMaterial.taxCodeValue}
+                          onChange={(e) =>
+                            setNewMasterMaterial({
+                              ...newMasterMaterial,
+                              taxCodeValue: e.target.value,
+                            })
+                          }
+                          placeholder={`Enter ${newMasterMaterial.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} code`}
+                        />
+                      </div>
+                    )}
                   </div>
                   <Button
                     onClick={handleAddMasterMaterial}
                     disabled={
                       !newMasterMaterial.name.trim() ||
                       masterMaterials.some((m: any) => m.name.toLowerCase().trim() === newMasterMaterial.name.toLowerCase().trim()) ||
-                      masterMaterials.some((m: any) => m.code === newMasterMaterial.code)
+                      masterMaterials.some((m: any) => m.code === newMasterMaterial.code) ||
+                      (newMasterMaterial.taxCodeType && !newMasterMaterial.taxCodeValue.trim())
                     }
                     className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -1974,81 +2259,84 @@ export default function AdminDashboard() {
                       No material templates created yet. Create one above.
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {masterMaterials.filter((t: any) => (t.name + ' ' + t.code + ' ' + (t.category || '')).toLowerCase().includes(masterSearch.toLowerCase())).slice(0,12).map((template: any) => (
-                        <div key={template.id} className="p-2 border rounded flex items-center justify-between">
-                          <div className="flex-1">
-                            {editingMaterialId === template.id ? (
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  value={newMaterial.name}
-                                  onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })}
-                                  placeholder="Enter material name"
-                                  className="max-w-xs"
-                                />
-                                <Button size="sm" onClick={async () => {
-                                  if (!newMaterial.name.trim()) {
-                                    toast({ title: 'Error', description: 'Material name is required', variant: 'destructive' });
-                                    return;
-                                  }
-                                  try {
-                                      const res = await apiFetch(`/material-templates/${template.id}`, {
-                                        method: 'PUT',
-                                        body: JSON.stringify({ name: newMaterial.name, code: template.code })
-                                      });
-                                      if (!res.ok) {
-                                        const text = await res.text().catch(() => '');
-                                        console.error('[material-templates PUT] failed', res.status, text);
-                                        toast({ title: 'Error', description: text || 'Failed to update material (server error)', variant: 'destructive' });
-                                        throw new Error(text || 'update failed');
-                                      }
-                                      const data = await res.json().catch(() => null);
-                                      setMasterMaterials(prev => prev.map(m => m.id === template.id ? { ...m, name: newMaterial.name, ...(data?.template || {}) } : m));
-                                      setEditingMaterialId(null);
-                                      toast({ title: 'Success', description: 'Material name updated' });
-                                    } catch (err) {
-                                      console.error('update error', err);
-                                      if (!(err as any)?.message) {
-                                        toast({ title: 'Error', description: 'Failed to update material', variant: 'destructive' });
-                                      }
+                    <div className="space-y-2 max-h-80 overflow-y-auto p-2">
+                      {masterMaterials
+                        .filter((t: any) => (t.name + ' ' + t.code + ' ' + (t.category || '')).toLowerCase().includes(masterSearch.toLowerCase()))
+                        .slice(0, 36)
+                        .map((template: any) => (
+                          <div key={template.id} className="p-4 border rounded flex items-center justify-between bg-white">
+                            <div className="flex-1">
+                              {editingMaterialId === template.id ? (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    value={newMaterial.name}
+                                    onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })}
+                                    placeholder="Enter material name"
+                                    className="max-w-xs"
+                                  />
+                                  <Button size="sm" onClick={async () => {
+                                    if (!newMaterial.name.trim()) {
+                                      toast({ title: 'Error', description: 'Material name is required', variant: 'destructive' });
+                                      return;
                                     }
-                                }}>Save</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setEditingMaterialId(null)}>Cancel</Button>
-                              </div>
-                            ) : (
-                              <div>
-                                <div className="font-medium text-sm">{template.name}</div>
-                                <div className="text-xs text-muted-foreground">{template.code} {template.category && (<span className="ml-2 text-[11px] text-gray-500">• {template.category}</span>)}</div>
+                                    try {
+                                        const res = await apiFetch(`/material-templates/${template.id}`, {
+                                          method: 'PUT',
+                                          body: JSON.stringify({ name: newMaterial.name, code: template.code })
+                                        });
+                                        if (!res.ok) {
+                                          const text = await res.text().catch(() => '');
+                                          console.error('[material-templates PUT] failed', res.status, text);
+                                          toast({ title: 'Error', description: text || 'Failed to update material (server error)', variant: 'destructive' });
+                                          throw new Error(text || 'update failed');
+                                        }
+                                        const data = await res.json().catch(() => null);
+                                        setMasterMaterials(prev => prev.map(m => m.id === template.id ? { ...m, name: newMaterial.name, ...(data?.template || {}) } : m));
+                                        setEditingMaterialId(null);
+                                        toast({ title: 'Success', description: 'Material name updated' });
+                                      } catch (err) {
+                                        console.error('update error', err);
+                                        if (!(err as any)?.message) {
+                                          toast({ title: 'Error', description: 'Failed to update material', variant: 'destructive' });
+                                        }
+                                      }
+                                  }}>Save</Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setEditingMaterialId(null)}>Cancel</Button>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div className="font-medium text-sm">{template.name}</div>
+                                  <div className="text-xs text-muted-foreground">{template.code} {template.category && (<span className="ml-2 text-[11px] text-gray-500">• {template.category}</span>)}</div>
+                                </div>
+                              )}
+                            </div>
+                            {editingMaterialId !== template.id && (
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" onClick={() => {
+                                  setEditingMaterialId(template.id);
+                                  setNewMaterial({ ...newMaterial, name: template.name });
+                                }}>Edit</Button>
+                                <Button size="sm" variant="destructive" onClick={async () => {
+                                  if (!window.confirm(`Delete "${template.name}"? This cannot be undone.`)) return;
+                                  try {
+                                    console.log('[DELETE template]', template.id, template.name);
+                                    const res = await apiFetch(`/material-templates/${template.id}`, { method: 'DELETE' });
+                                    console.log('[DELETE response]', res.status, res.ok);
+                                    if (!res.ok) {
+                                      const errorData = await res.json();
+                                      throw new Error(errorData.message || 'Failed to delete');
+                                    }
+                                    setMasterMaterials(prev => prev.filter(m => m.id !== template.id));
+                                    toast({ title: 'Success', description: 'Material deleted' });
+                                  } catch (err) {
+                                    console.error('delete error', err);
+                                    toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete material', variant: 'destructive' });
+                                  }
+                                }}>Delete</Button>
                               </div>
                             )}
                           </div>
-                          {editingMaterialId !== template.id && (
-                            <div className="flex items-center gap-2">
-                              <Button size="sm" onClick={() => {
-                                setEditingMaterialId(template.id);
-                                setNewMaterial({ ...newMaterial, name: template.name });
-                              }}>Edit</Button>
-                              <Button size="sm" variant="destructive" onClick={async () => {
-                                if (!window.confirm(`Delete "${template.name}"? This cannot be undone.`)) return;
-                                try {
-                                  console.log('[DELETE template]', template.id, template.name);
-                                  const res = await apiFetch(`/material-templates/${template.id}`, { method: 'DELETE' });
-                                  console.log('[DELETE response]', res.status, res.ok);
-                                  if (!res.ok) {
-                                    const errorData = await res.json();
-                                    throw new Error(errorData.message || 'Failed to delete');
-                                  }
-                                  setMasterMaterials(prev => prev.filter(m => m.id !== template.id));
-                                  toast({ title: 'Success', description: 'Material deleted' });
-                                } catch (err) {
-                                  console.error('delete error', err);
-                                  toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete material', variant: 'destructive' });
-                                }
-                              }}>Delete</Button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   )}
                 </CardContent>
@@ -2168,6 +2456,17 @@ export default function AdminDashboard() {
                         setNewShop({ ...newShop, gstNo: e.target.value })
                       }
                       placeholder="29ABCDE1234F1Z5"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Vendor Category (Optional)</Label>
+                    <Input
+                      value={newShop.vendorCategory}
+                      onChange={(e) =>
+                        setNewShop({ ...newShop, vendorCategory: e.target.value })
+                      }
+                      placeholder="e.g. Hardware Supplier, Electrical Distributor"
                     />
                   </div>
                 </div>
@@ -2383,30 +2682,30 @@ export default function AdminDashboard() {
                                 request.submittedAt
                               ).toLocaleDateString()}
                             </p>
-                            <div className="grid grid-cols-2 gap-3 text-sm mt-2">
+                              <div className="grid grid-cols-2 gap-3 text-sm mt-2">
                               <div>
                                 <p className="font-semibold">Code</p>
-                                <p>{request.material.code}</p>
+                                <p>{request.material.code || request.material.template_code || request.material.templateCode || '-'}</p>
                               </div>
                               <div>
                                 <p className="font-semibold">Rate</p>
-                                <p>₹{request.material.rate}</p>
+                                <p>₹{request.material.rate ?? request.material.price ?? '-'}</p>
                               </div>
                               <div>
                                 <p className="font-semibold">Unit</p>
-                                <p>{request.material.unit}</p>
+                                <p>{request.material.unit || request.material.uom || '-'}</p>
                               </div>
                               <div>
                                 <p className="font-semibold">Category</p>
-                                <p>{request.material.category}</p>
+                                <p>{request.material.category || request.material.categoryName || request.material.category_name || request.material.vendorCategory || request.material.vendor_category || '-'}</p>
                               </div>
                               <div>
                                 <p className="font-semibold">Sub Category</p>
-                                <p>{request.material.subCategory}</p>
+                                <p>{request.material.subCategory || request.material.subcategory || request.material.sub_category || '-'}</p>
                               </div>
                               <div>
                                 <p className="font-semibold">Brand</p>
-                                <p>{request.material.brandName}</p>
+                                <p>{request.material.brandName || request.material.brandname || request.material.brand || request.material.make || '-'}</p>
                               </div>
                             </div>
                           </div>
@@ -2702,6 +3001,7 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+
         </Tabs>
       </div>
     </Layout>

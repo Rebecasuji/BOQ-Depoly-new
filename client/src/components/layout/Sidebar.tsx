@@ -282,6 +282,19 @@ export function Sidebar() {
                   <ShoppingCart className="h-4 w-4" /> Create BOQ
                 </span>
               </Link>
+              <Link href="/admin/dashboard?tab=create-product">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/admin/dashboard?tab=create-product"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Create Product
+                </span>
+              </Link>
             </>
           )}
 
@@ -319,11 +332,11 @@ export function Sidebar() {
                 </span>
               </Link>
 
-              <Link href="/supplier/materials">
+              <Link href="/admin/manage-materials">
                 <span
                   className={cn(
                     "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/supplier/materials"
+                    location === "/admin/manage-materials"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
                   )}

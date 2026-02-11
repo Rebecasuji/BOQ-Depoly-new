@@ -45,9 +45,10 @@ export default function Login() {
        */
       setLocalUser({
         id: user.id,
-        name: user.name,
-        email: user.email,
+        username: user.username,
         role: user.role,
+        fullName: user.fullName,
+        approved: user.approved,
         shopId: user.role === "supplier" ? user.shopId : undefined,
       });
 

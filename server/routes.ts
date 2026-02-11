@@ -191,9 +191,24 @@ export async function registerRoutes(
     await query(
       `ALTER TABLE material_submissions ADD COLUMN IF NOT EXISTS product VARCHAR(255)`,
     );
+    await query(
+      `ALTER TABLE material_submissions ADD COLUMN IF NOT EXISTS category VARCHAR(255)`,
+    );
   } catch (err: unknown) {
     console.warn(
       "[migrations] ensure material_submissions columns failed (continuing):",
+      (err as any)?.message || err,
+    );
+  }
+
+  // Ensure shops table has vendor_category column
+  try {
+    await query(
+      `ALTER TABLE shops ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(255)`,
+    );
+  } catch (err: unknown) {
+    console.warn(
+      "[migrations] ensure shops vendor_category column failed (continuing):",
       (err as any)?.message || err,
     );
   }
@@ -206,6 +221,7 @@ export async function registerRoutes(
         name VARCHAR(255) NOT NULL,
         client VARCHAR(255),
         budget VARCHAR(100),
+        location TEXT,
         status VARCHAR(50) DEFAULT 'draft',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
@@ -220,6 +236,11 @@ export async function registerRoutes(
       "[db] Could not create boq_projects table:",
       (err as any)?.message || err,
     );
+  }
+  try {
+    await query(`ALTER TABLE boq_projects ADD COLUMN IF NOT EXISTS location TEXT`);
+  } catch (err: unknown) {
+    console.warn('[db] Could not add location column to boq_projects (continuing):', (err as any)?.message || err);
   }
 
   // Ensure boq_items table exists (stores BOQ line items captured from estimators)
@@ -256,6 +277,7 @@ export async function registerRoutes(
         project_id VARCHAR(100) NOT NULL,
         project_name VARCHAR(255),
         project_client VARCHAR(255),
+        project_location TEXT,
         version_number INTEGER NOT NULL,
         status VARCHAR(50) DEFAULT 'draft',
         created_at TIMESTAMP DEFAULT NOW(),
@@ -282,14 +304,15 @@ export async function registerRoutes(
   try {
     await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS project_name VARCHAR(255)`);
     await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS project_client VARCHAR(255)`);
+    await query(`ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS project_location TEXT`);
 
-    // Populate project_name and project_client from boq_projects where missing
+    // Populate project_name, project_client and project_location from boq_projects where missing
     await query(`
       UPDATE boq_versions v
-      SET project_name = p.name, project_client = p.client
+      SET project_name = p.name, project_client = p.client, project_location = p.location
       FROM boq_projects p
       WHERE v.project_id = p.id
-        AND (v.project_name IS NULL OR v.project_client IS NULL)
+        AND (v.project_name IS NULL OR v.project_client IS NULL OR v.project_location IS NULL)
     `);
 
     console.log("[db] boq_versions project_name and project_client populated");
@@ -333,6 +356,25 @@ export async function registerRoutes(
   } catch (err: unknown) {
     console.warn(
       "[db] Could not ensure user_added column on boq_items:",
+      (err as any)?.message || err,
+    );
+  }
+
+  // Ensure material_templates table has vendor_category, tax_code_type, and tax_code_value columns
+  try {
+    await query(
+      `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(255)`,
+    );
+    await query(
+      `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10) CHECK (tax_code_type IN ('hsn', 'sac'))`,
+    );
+    await query(
+      `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(50)`,
+    );
+    console.log("[db] material_templates tax and vendor columns ensured");
+  } catch (err: unknown) {
+    console.warn(
+      "[db] Could not ensure material_templates columns:",
       (err as any)?.message || err,
     );
   }
@@ -876,8 +918,8 @@ export async function registerRoutes(
         );
 
         const result = await query(
-          `INSERT INTO shops (id, name, location, phoneCountryCode, contactNumber, city, state, country, pincode, image, rating, categories, gstno, owner_id, approved, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now()) RETURNING *`,
+          `INSERT INTO shops (id, name, location, phoneCountryCode, contactNumber, city, state, country, pincode, image, rating, categories, gstno, vendor_category, owner_id, approved, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) RETURNING *`,
           [
             id,
             body.name || null,
@@ -892,6 +934,7 @@ export async function registerRoutes(
             body.rating || null,
             JSON.stringify(categories),
             body.gstNo || null,
+            body.vendorCategory || null,
             req.user.id,
             false,
           ],
@@ -931,6 +974,50 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/my-material-submissions - Get authenticated user's material submissions for prefill
+  app.get(
+    "/api/my-material-submissions",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+          res.status(401).json({ message: "Unauthorized" });
+          return;
+        }
+
+        const result = await query(
+          `SELECT * FROM material_submissions WHERE submitted_by = $1 ORDER BY submitted_at DESC`,
+          [userId],
+        );
+
+        res.json({ submissions: result.rows });
+      } catch (err) {
+        console.error("/api/my-material-submissions error", err);
+        res.status(500).json({ message: "failed to list material submissions" });
+      }
+    },
+  );
+
+  // GET /api/material-submissions - Get all material submissions (Admin/Software/Purchase for admin view)
+  app.get(
+    "/api/material-submissions",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const result = await query(
+          `SELECT * FROM material_submissions ORDER BY submitted_at DESC`,
+        );
+
+        res.json({ submissions: result.rows });
+      } catch (err) {
+        console.error("/api/material-submissions error", err);
+        res.status(500).json({ message: "failed to list material submissions" });
+      }
+    },
+  );
+
   // POST /api/materials - create material (authenticated)
   app.post(
     "/api/materials",
@@ -955,8 +1042,8 @@ export async function registerRoutes(
         );
 
         const result = await query(
-          `INSERT INTO materials (id, name, code, rate, shop_id, unit, category, brandname, modelnumber, subcategory, product, technicalspecification, image, attributes, master_material_id, approved, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) RETURNING *`,
+          `INSERT INTO materials (id, name, code, rate, shop_id, unit, category, brandname, modelnumber, subcategory, product, technicalspecification, image, attributes, master_material_id, template_id, approved, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now()) RETURNING *`,
           [
             id,
             body.name || null,
@@ -973,6 +1060,7 @@ export async function registerRoutes(
             body.image || null,
             JSON.stringify(attributes || {}),
             body.masterMaterialId || null,
+            body.templateId || null,
             false,
           ],
         );
@@ -1030,6 +1118,7 @@ export async function registerRoutes(
         "image",
         "rating",
         "gstNo",
+        "vendorCategory",
       ]) {
         if (body[k] !== undefined) {
           fields.push(`${k} = $${idx++}`);
@@ -1309,7 +1398,7 @@ export async function registerRoutes(
     requireRole("admin", "software_team", "purchase_team"),
     async (req: Request, res: Response) => {
       try {
-        const { name, code, category } = req.body;
+        const { name, code, category, vendorCategory, taxCodeType, taxCodeValue } = req.body;
 
         if (!name || !name.trim()) {
           res.status(400).json({ message: "Template name is required" });
@@ -1323,10 +1412,10 @@ export async function registerRoutes(
 
         const id = randomUUID();
         const result = await query(
-          `INSERT INTO material_templates (id, name, code, category, created_at, updated_at) 
-         VALUES ($1, $2, $3, $4, NOW(), NOW()) 
+          `INSERT INTO material_templates (id, name, code, category, vendor_category, tax_code_type, tax_code_value, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) 
          RETURNING *`,
-          [id, name.trim(), code.trim(), category || null],
+          [id, name.trim(), code.trim(), category || null, vendorCategory || null, taxCodeType || null, taxCodeValue || null],
         );
 
         res.status(201).json({ template: result.rows[0] });
@@ -1341,14 +1430,14 @@ export async function registerRoutes(
   app.put(
     "/api/material-templates/:id",
     authMiddleware,
-    requireRole("admin", "software_team"),
+    requireRole("admin", "software_team", "purchase_team"),
     async (req: Request, res: Response) => {
       try {
         const id = req.params.id;
         console.log('[PUT /api/material-templates/:id] user:', (req as any).user);
         console.log('[PUT /api/material-templates/:id] params.id:', req.params.id);
         console.log('[PUT /api/material-templates/:id] body:', req.body);
-        const { name, code, category } = req.body;
+        const { name, code, category, vendorCategory, taxCodeType, taxCodeValue } = req.body;
 
         // Only update fields that are provided
         const fields: string[] = [];
@@ -1366,6 +1455,18 @@ export async function registerRoutes(
         if (category !== undefined) {
           fields.push(`category = $${idx++}`);
           vals.push(category || null);
+        }
+        if (vendorCategory !== undefined) {
+          fields.push(`vendor_category = $${idx++}`);
+          vals.push(vendorCategory || null);
+        }
+        if (taxCodeType !== undefined) {
+          fields.push(`tax_code_type = $${idx++}`);
+          vals.push(taxCodeType || null);
+        }
+        if (taxCodeValue !== undefined) {
+          fields.push(`tax_code_value = $${idx++}`);
+          vals.push(taxCodeValue || null);
         }
 
         if (fields.length === 0) {
@@ -1398,7 +1499,7 @@ export async function registerRoutes(
   app.delete(
     "/api/material-templates/:id",
     authMiddleware,
-    requireRole("admin", "software_team"),
+    requireRole("admin", "software_team", "purchase_team"),
     async (req: Request, res: Response) => {
       try {
         const id = req.params.id;
@@ -1546,11 +1647,11 @@ export async function registerRoutes(
     },
   );
 
-  // POST /api/categories - Create a new category (Admin/Software Team/Purchase Team)
+  // POST /api/categories - Create a new category (Admin/Software Team/Purchase Team/Pre Sales)
   app.post(
     "/api/categories",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { name } = req.body;
@@ -1588,7 +1689,7 @@ export async function registerRoutes(
   app.post(
     "/api/subcategories",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { name, category } = req.body;
@@ -1630,7 +1731,7 @@ export async function registerRoutes(
   app.put(
     "/api/categories/:name",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { name: oldName } = req.params;
@@ -1674,7 +1775,7 @@ export async function registerRoutes(
   app.put(
     "/api/subcategories/:id",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { id } = req.params;
@@ -1712,7 +1813,7 @@ export async function registerRoutes(
   app.delete(
     "/api/subcategories/:id",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const id = req.params.id;
@@ -1760,11 +1861,11 @@ export async function registerRoutes(
     }
   });
 
-  // DELETE /api/categories/:name - Delete a category and its subcategories (Admin/Software Team only)
+  // DELETE /api/categories/:name - Delete a category and its subcategories (Admin/Software Team/Purchase Team/Pre Sales)
   app.delete(
     "/api/categories/:name",
     authMiddleware,
-    requireRole("admin", "software_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const name = req.params.name;
@@ -1892,14 +1993,15 @@ export async function registerRoutes(
 
   // ====== PRODUCTS CRUD ======
 
-  // POST /api/products - Create a new product (Admin/Software Team/Purchase Team)
+  // POST /api/products - Create a new product (Admin/Software Team/Purchase Team/Pre Sales)
   app.post(
     "/api/products",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
-        const { name, subcategory } = req.body;
+        const { name, subcategory, taxCodeType, taxCodeValue } = req.body;
+        console.log('/api/products POST body ->', { name, subcategory, taxCodeType, taxCodeValue });
 
         if (!name) {
           res.status(400).json({ message: "Product name is required" });
@@ -1913,12 +2015,13 @@ export async function registerRoutes(
 
         const result = await query(
           `
-        INSERT INTO products (name, subcategory, created_by)
-        VALUES ($1, $2, $3)
+        INSERT INTO products (name, subcategory, tax_code_type, tax_code_value, created_by)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
       `,
-          [name, subcategory || null, req.user?.username || "unknown"],
+          [name, subcategory || null, taxCodeType || null, taxCodeValue || null, req.user?.username || "unknown"],
         );
+        console.log('/api/products POST inserted ->', result.rows[0]);
 
         res.status(201).json({ product: result.rows[0] });
       } catch (err: any) {
@@ -1958,11 +2061,12 @@ export async function registerRoutes(
   app.put(
     "/api/products/:id",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { id } = req.params;
-        const { name, subcategory } = req.body;
+        const { name, subcategory, taxCodeType, taxCodeValue } = req.body;
+        console.log(`/api/products/${id} PUT body ->`, { name, subcategory, taxCodeType, taxCodeValue });
 
         if (!name) {
           res.status(400).json({ message: "Product name is required" });
@@ -1977,12 +2081,13 @@ export async function registerRoutes(
         const result = await query(
           `
         UPDATE products 
-        SET name = $1, subcategory = $2
-        WHERE id = $3
+        SET name = $1, subcategory = $2, tax_code_type = $3, tax_code_value = $4
+        WHERE id = $5
         RETURNING *
       `,
-          [name, subcategory, id],
+          [name, subcategory, taxCodeType || null, taxCodeValue || null, id],
         );
+        console.log(`/api/products/${id} PUT updated ->`, result.rows[0]);
 
         if (result.rowCount === 0) {
           res.status(404).json({ message: "Product not found" });
@@ -2005,7 +2110,7 @@ export async function registerRoutes(
   app.delete(
     "/api/products/:id",
     authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
     async (req: Request, res: Response) => {
       try {
         const { id } = req.params;
@@ -2067,7 +2172,7 @@ export async function registerRoutes(
     requireRole("supplier", "purchase_team", "admin"),
     async (req: Request, res: Response) => {
       try {
-        const {
+        let {
           template_id,
           shop_id,
           rate,
@@ -2075,6 +2180,7 @@ export async function registerRoutes(
           brandname,
           modelnumber,
           subcategory,
+          category,
           product,
           technicalspecification,
           dimensions,
@@ -2082,17 +2188,41 @@ export async function registerRoutes(
           metaltype,
         } = req.body;
 
-        if (!template_id || !shop_id) {
-          res
-            .status(400)
-            .json({ message: "template_id and shop_id are required" });
+        // Ensure template_id provided
+        if (!template_id) {
+          res.status(400).json({ message: "template_id is required" });
+          return;
+        }
+
+        // If shop_id not provided and the requester is a supplier, auto-select their primary shop
+        if (!shop_id && (req as any).user?.role === "supplier") {
+          try {
+            const ownerId = (req as any).user?.id;
+            const shopsResult = await query(
+              "SELECT id FROM shops WHERE owner_id = $1 ORDER BY created_at DESC",
+              [ownerId],
+            );
+            if (shopsResult.rows.length === 0) {
+              res.status(400).json({ message: "No shop found for supplier. Please create a shop first." });
+              return;
+            }
+            shop_id = shopsResult.rows[0].id;
+          } catch (err) {
+            console.error("/api/material-submissions - failed to lookup supplier shop", err);
+            res.status(500).json({ message: "failed to determine supplier shop" });
+            return;
+          }
+        }
+
+        if (!shop_id) {
+          res.status(400).json({ message: "shop_id is required" });
           return;
         }
 
         const id = randomUUID();
         const result = await query(
-          `INSERT INTO material_submissions (id, template_id, shop_id, rate, unit, brandname, modelnumber, subcategory, product, technicalspecification, dimensions, finishtype, metaltype, submitted_by, submitted_at, approved)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NULL)
+          `INSERT INTO material_submissions (id, template_id, shop_id, rate, unit, brandname, modelnumber, subcategory, category, product, technicalspecification, dimensions, finishtype, metaltype, submitted_by, submitted_at, approved)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NULL)
            RETURNING *`,
           [
             id,
@@ -2103,6 +2233,7 @@ export async function registerRoutes(
             brandname || null,
             modelnumber || null,
             subcategory || null,
+            category || null,
             product || null,
             technicalspecification || null,
             dimensions || null,
@@ -2116,6 +2247,33 @@ export async function registerRoutes(
       } catch (err: any) {
         console.error("/api/material-submissions POST error", err);
         res.status(500).json({ message: "failed to submit material" });
+      }
+    },
+  );
+
+  // GET /api/supplier/my-shops - Get shops owned by the current supplier
+  app.get(
+    "/api/supplier/my-shops",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+          return res
+            .status(401)
+            .json({ message: "Unauthorized: user not authenticated" });
+        }
+
+        // Get shops owned by this user
+        const result = await query(
+          "SELECT * FROM shops WHERE owner_id = $1 ORDER BY created_at DESC",
+          [userId],
+        );
+
+        res.json({ shops: result.rows });
+      } catch (err: any) {
+        console.error("/api/supplier/my-shops error", err);
+        res.status(500).json({ message: "failed to get shops" });
       }
     },
   );
@@ -2182,7 +2340,7 @@ export async function registerRoutes(
     async (_req, res) => {
       try {
         const result = await query(`
-          SELECT ms.*, mt.name as template_name, mt.code as template_code, mt.category, s.name as shop_name, u.username as submitted_by_username
+          SELECT ms.*, mt.name as template_name, mt.code as template_code, mt.category as template_category, s.name as shop_name, u.username as submitted_by_username
           FROM material_submissions ms
           JOIN material_templates mt ON ms.template_id = mt.id
           JOIN shops s ON ms.shop_id = s.id
@@ -2361,7 +2519,8 @@ export async function registerRoutes(
     authMiddleware,
     async (req: Request, res: Response) => {
       try {
-        const { name, client, budget } = req.body;
+        const { name, client, budget, location } = req.body;
+        console.log('/api/boq-projects POST body ->', { name, client, budget, location });
 
         if (!name || !name.trim()) {
           res.status(400).json({ message: "Project name is required" });
@@ -2371,9 +2530,9 @@ export async function registerRoutes(
         const projectId = `proj-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
         await query(
-          `INSERT INTO boq_projects (id, name, client, budget, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
-          [projectId, name.trim(), client || "", budget || "", "draft"],
+          `INSERT INTO boq_projects (id, name, client, budget, location, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+          [projectId, name.trim(), client || "", budget || "", location || null, "draft"],
         );
 
         res.json({
@@ -2381,6 +2540,7 @@ export async function registerRoutes(
           name: name.trim(),
           client: client || "",
           budget: budget || "",
+          location: location || "",
           status: "draft",
         });
       } catch (err) {
@@ -2397,7 +2557,7 @@ export async function registerRoutes(
     async (req: Request, res: Response) => {
       try {
         const result = await query(
-          `SELECT id, name, client, budget, status, created_at, updated_at FROM boq_projects ORDER BY created_at DESC`,
+          `SELECT id, name, client, budget, location, status, created_at, updated_at FROM boq_projects ORDER BY created_at DESC`,
         );
 
         res.json({ projects: result.rows || [] });
@@ -2417,7 +2577,7 @@ export async function registerRoutes(
         const { projectId } = req.params;
 
         const result = await query(
-          `SELECT id, name, client, budget, status, created_at, updated_at FROM boq_projects WHERE id = $1`,
+          `SELECT id, name, client, budget, location, status, created_at, updated_at FROM boq_projects WHERE id = $1`,
           [projectId],
         );
 
@@ -2505,7 +2665,7 @@ export async function registerRoutes(
         const { projectId } = req.params;
 
         const result = await query(
-          `SELECT id, project_id, version_number, status, created_at, updated_at 
+          `SELECT id, project_id, project_name, project_client, project_location, version_number, status, created_at, updated_at 
            FROM boq_versions 
            WHERE project_id = $1 
            ORDER BY version_number DESC`,
@@ -2542,23 +2702,25 @@ export async function registerRoutes(
         const nextVersion = (versionResult.rows[0]?.max_version || 0) + 1;
         const versionId = `ver-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        // Fetch project name/client so we can store them on the version
+        // Fetch project name/client/location so we can store them on the version
         let projectName: string | null = null;
         let projectClient: string | null = null;
+        let projectLocation: string | null = null;
         try {
-          const proj = await query(`SELECT name, client FROM boq_projects WHERE id = $1`, [project_id]);
+          const proj = await query(`SELECT name, client, location FROM boq_projects WHERE id = $1`, [project_id]);
           projectName = proj.rows[0]?.name ?? null;
           projectClient = proj.rows[0]?.client ?? null;
+          projectLocation = proj.rows[0]?.location ?? null;
         } catch (err) {
           // non-fatal: proceed with nulls if lookup fails
-          console.warn("[db] Could not fetch project name/client:", (err as any)?.message || err);
+          console.warn("[db] Could not fetch project name/client/location:", (err as any)?.message || err);
         }
 
-        // Create new version (store project name and client for easier querying/version display)
+        // Create new version (store project name, client, location for easier querying/version display)
         await query(
-          `INSERT INTO boq_versions (id, project_id, project_name, project_client, version_number, status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
-          [versionId, project_id, projectName, projectClient, nextVersion, "draft"],
+          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, version_number, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
+          [versionId, project_id, projectName, projectClient, projectLocation, nextVersion, "draft"],
         );
 
         // Copy items from previous version if requested

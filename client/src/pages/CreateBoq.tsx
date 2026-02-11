@@ -1242,7 +1242,7 @@ export default function CreateBoq() {
                         <th colSpan={5}></th>
                         <th className="border px-1 py-1 text-center text-xs font-medium w-14">
                           Supply
-                        </th>
+                        </th>                     
                         <th className="border px-1 py-1 text-center text-xs font-medium w-14">
                           Install
                         </th>

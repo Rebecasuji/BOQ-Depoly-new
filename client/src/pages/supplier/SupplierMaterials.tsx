@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout/Layout";
+import { SupplierLayout } from "@/components/layout/SupplierLayout";
 import {
   Card,
   CardContent,
@@ -36,12 +37,14 @@ interface MaterialTemplate {
   name: string;
   code: string;
   category?: string;
+  vendor_category?: string;
   created_at: string;
 }
 
 interface Shop {
   id: string;
   name: string;
+  location?: string;
 }
 
 const UNIT_OPTIONS = ["pcs", "kg", "meter", "sqft", "cum", "litre", "set", "nos"];
@@ -51,16 +54,19 @@ export default function SupplierMaterials() {
   const { toast } = useToast();
   const { user, addSupportMessage, deleteMessage, supportMessages } = useData();
   const [activeTab, setActiveTab] = useState<"templates" | "submissions" | "support">("templates");
-  
+  const [shopName, setShopName] = useState("");
+  const [shopLocation, setShopLocation] = useState("");
+
   // Support Message State
   const [supportSenderName, setSupportSenderName] = useState("");
   const [supportSenderInfo, setSupportSenderInfo] = useState("");
   const [supportMsg, setSupportMsg] = useState("");
-  
+
   // Material Templates State
   const [templates, setTemplates] = useState<MaterialTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [templatesSearch, setTemplatesSearch] = useState("");
+  const [vendorCategoryFilter, setVendorCategoryFilter] = useState<string>("");
   // list-only view: show a limited set of templates; use search to find others
 
   // Categories State
@@ -98,7 +104,35 @@ export default function SupplierMaterials() {
     loadShops();
     loadCategories();
     loadProducts();
+    loadSupplierShops();
   }, []);
+
+  const loadSupplierShops = async () => {
+    try {
+      const token = localStorage.getItem("authToken");
+      const response = await fetch("/api/supplier/my-shops", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      const supplierShops = data.shops || [];
+
+      // Get the first approved shop, or the first shop
+      const primaryShop = supplierShops.find((s: Shop) => s.approved === true) || supplierShops[0];
+      if (primaryShop) {
+        setShopName(primaryShop.name);
+        setShopLocation(primaryShop.location || "");
+        // ensure submissions are tied to supplier's shop by default
+        setSelectedShop(primaryShop.id);
+      }
+    } catch (error) {
+      console.error("Error loading supplier shops:", error);
+    }
+  };
 
   const loadMaterialTemplates = async () => {
     try {
@@ -191,7 +225,10 @@ export default function SupplierMaterials() {
       finishtype: "",
       metaltype: "",
     });
-    setSelectedShop("");
+    // For suppliers we keep their primary shop selected by default
+    if (user?.role !== 'supplier') {
+      setSelectedShop("");
+    }
     // Load subcategories if template has a category
     if (template.category) {
       loadSubcategories(template.category);
@@ -210,12 +247,28 @@ export default function SupplierMaterials() {
     const tryPrefill = async () => {
       if (!selectedTemplate || !selectedShop) return;
       try {
+        // First try to get approved materials
         const res = await fetch('/api/materials');
-        if (!res.ok) return;
-        const data = await res.json();
-        const materials = data.materials || [];
-        // find material by template_id and shop_id
-        const found = materials.find((m: any) => String(m.template_id) === String(selectedTemplate.id) && String(m.shop_id) === String(selectedShop));
+        let found = null;
+        
+        if (res.ok) {
+          const data = await res.json();
+          const materials = data.materials || [];
+          // find material by template_id and shop_id
+          found = materials.find((m: any) => String(m.template_id) === String(selectedTemplate.id) && String(m.shop_id) === String(selectedShop));
+        }
+        
+        // If not found in approved, check user's submissions
+        if (!found) {
+          const submissionRes = await fetch('/api/my-material-submissions');
+          if (submissionRes.ok) {
+            const data = await submissionRes.json();
+            const submissions = data.submissions || [];
+            // find submission by template_id and shop_id (most recent first)
+            found = submissions.find((s: any) => String(s.template_id) === String(selectedTemplate.id) && String(s.shop_id) === String(selectedShop));
+          }
+        }
+        
         if (found) {
           // Prefill form fields with the existing material's values (set empty string when not provided)
           setFormData(() => ({
@@ -262,21 +315,18 @@ export default function SupplierMaterials() {
   const handleSubmitMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedTemplate || !selectedShop) {
-      toast({
-        title: "Error",
-        description: "Please select a template and shop",
-        variant: "destructive",
-      });
+    if (!selectedTemplate) {
+      toast({ title: "Error", description: "Please select a template", variant: "destructive" });
       return;
     }
 
-    if (!formData.rate || !formData.unit || !formData.category) {
-      toast({
-        title: "Error",
-        description: "Rate, unit, and category are required",
-        variant: "destructive",
-      });
+    if (!selectedShop) {
+      toast({ title: "Error", description: "No shop selected for submission", variant: "destructive" });
+      return;
+    }
+
+    if (!formData.rate || !formData.unit) {
+      toast({ title: "Error", description: "Rate and unit are required", variant: "destructive" });
       return;
     }
 
@@ -306,6 +356,7 @@ export default function SupplierMaterials() {
           brandname: payload.brandname,
           modelnumber: payload.modelnumber,
           subcategory: payload.subcategory,
+          category: payload.category,
           product: payload.product,
           technicalspecification: payload.technicalspecification,
           dimensions: payload.dimensions,
@@ -340,7 +391,10 @@ export default function SupplierMaterials() {
         finishtype: "",
         metaltype: "",
       });
-      setSelectedShop("");
+      // preserve supplier selected shop; clear only for non-suppliers
+      if (user?.role !== 'supplier') {
+        setSelectedShop("");
+      }
       setEntriesList([]);
     } catch (error) {
       console.error("Error submitting material:", error);
@@ -355,8 +409,8 @@ export default function SupplierMaterials() {
       toast({ title: "Error", description: "Please select a template and shop", variant: "destructive" });
       return;
     }
-    if (!formData.rate || !formData.unit || !formData.category) {
-      toast({ title: "Error", description: "Rate, unit, and category are required to add entry", variant: "destructive" });
+    if (!formData.rate || !formData.unit) {
+      toast({ title: "Error", description: "Rate and unit are required to add entry", variant: "destructive" });
       return;
     }
 
@@ -404,301 +458,351 @@ export default function SupplierMaterials() {
     })();
   };
 
+  const isSupplier = user?.role === 'supplier';
+  const layoutWrapper = isSupplier ? SupplierLayout : Layout;
+  const LayoutComponent = layoutWrapper as any;
+
   return (
-    <Layout>
-      <div className="container mx-auto py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Material Management</h1>
-          <p className="text-gray-600">
-            Select from available material templates and add your details
+    <LayoutComponent {...(isSupplier ? { shopName, shopLocation, shopApproved: true } : {})}>
+      <div className="p-6 lg:p-8 max-w-6xl mx-auto">
+        <div className={isSupplier ? "mb-8 bg-gradient-to-r from-blue-500 via-blue-400 to-cyan-400 rounded-xl p-8 text-white shadow-lg" : "mb-8"}>
+          <h1 className={isSupplier ? "text-4xl font-bold mb-2" : "text-3xl font-bold mb-2"}>📦 Manage Materials</h1>
+          <p className={isSupplier ? "text-blue-50" : "text-gray-600"}>
+            {isSupplier
+              ? "Select from available material templates, fill in the essentials (rate, unit, brand), and submit for approval"
+              : "Select material templates, fill in all required details, select shop, and submit for approval"
+            }
           </p>
         </div>
 
         <div className="grid gap-8">
           {/* Available Templates Section */}
           <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Package className="w-4 h-4 text-muted-foreground" />
-              <h2 className="text-xl font-semibold">Available Material Templates</h2>
+            <div className="flex items-center gap-2 mb-6">
+              <Package className="w-5 h-5 text-blue-600" />
+              <h2 className="text-2xl font-bold text-gray-800">Available Templates</h2>
+              <Badge className="bg-blue-100 text-blue-700">{templates.length} Total</Badge>
             </div>
 
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Input value={templatesSearch} onChange={(e) => setTemplatesSearch(e.target.value)} placeholder="Search templates..." />
-                
+            <div className="space-y-3 mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-sm mb-2 block">Search Templates</Label>
+                  <Input
+                    value={templatesSearch}
+                    onChange={(e) => setTemplatesSearch(e.target.value)}
+                    placeholder="Search by name or code..."
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm mb-2 block">Filter by Vendor Category</Label>
+                  <Select value={vendorCategoryFilter} onValueChange={setVendorCategoryFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from(new Set(templates.map(t => t.vendor_category).filter(Boolean))).map((category: any) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div />
             </div>
 
             {loadingTemplates ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin" />
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
               </div>
             ) : templates.length === 0 ? (
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-center text-gray-500">
-                    No material templates available yet
-                  </div>
+              <Card className="border-dashed border-2 border-gray-300">
+                <CardContent className="pt-8 pb-8 text-center">
+                  <Package className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                  <div className="text-gray-500 font-medium">No material templates available yet</div>
                 </CardContent>
               </Card>
             ) : (
-                <div className="space-y-2">
-                  {templates.filter(t => (t.name + ' ' + t.code + ' ' + (t.category||'')).toLowerCase().includes(templatesSearch.toLowerCase())).slice(0,12).map((template) => (
-                    <div key={template.id} className="p-2 border rounded flex items-center justify-between">
-                      <div>
-                        <div className="font-medium text-sm">{template.name}</div>
-                        <div className="text-xs text-muted-foreground">{template.code} {template.category && (<span className="ml-2 text-[11px] text-gray-500">• {template.category}</span>)}</div>
+              <div className="border rounded-md max-h-[400px] overflow-y-auto shadow-sm bg-white divide-y">
+                <div className="">
+                  {templates
+                    .filter(t => (t.name + ' ' + t.code + ' ' + (t.category || '')).toLowerCase().includes(templatesSearch.toLowerCase()))
+                    .filter(t => !vendorCategoryFilter || t.vendor_category === vendorCategoryFilter)
+                    .map((template) => (
+                      <div key={template.id} className="py-1 px-3 border-b last:border-0 hover:bg-blue-50 transition-all duration-200 cursor-pointer group flex items-center gap-4">
+                        <div className="flex-1 min-w-0 flex items-center gap-3">
+                          <span className="font-semibold text-gray-800 group-hover:text-blue-700 truncate">{template.name}</span>
+                          <span className="text-xs text-gray-500 whitespace-nowrap">({template.code})</span>
+                          {template.category && (<span className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-600 border border-gray-200 whitespace-nowrap">{template.category}</span>)}
+                          <Button size="sm" className="h-7 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white ml-2 shrink-0" onClick={(e) => { e.stopPropagation(); handleSelectTemplate(template); }}>Select</Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" onClick={() => handleSelectTemplate(template)}>Select</Button>
-                      </div>
-                    </div>
-                  ))}
-                  
+                    ))}
                 </div>
-              )
+              </div>
+            )
             }
           </div>
 
           {/* Submission Form Section */}
           {selectedTemplate && (
-            <Card id="material-form" className="bg-blue-50 border-blue-200 scroll-mt-20">
-              <CardHeader>
-                <CardTitle>Submit Material Details</CardTitle>
-                <CardDescription>
-                  Completing submission for: <strong>{selectedTemplate.name}</strong> (
-                  {selectedTemplate.code})
+            <Card id="material-form" className="bg-gradient-to-br from-white to-blue-50 border-blue-200 border-2 shadow-lg scroll-mt-20">
+              <CardHeader className="bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-t-lg">
+                <CardTitle className="text-2xl">✨ Submit Material Details</CardTitle>
+                <CardDescription className="text-blue-100">
+                  Completing submission for: <strong className="text-white">{selectedTemplate.name}</strong> ({selectedTemplate.code})
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSubmitMaterial} className="space-y-6">
-                  {/* Shop Selection */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>
-                        Shop <Required />
-                      </Label>
-                      <Select value={selectedShop} onValueChange={setSelectedShop}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a shop" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {shops.map((shop) => (
-                            <SelectItem key={shop.id} value={shop.id}>
-                              {shop.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>
-                        Rate <Required />
-                      </Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="Enter rate"
-                        value={formData.rate}
-                        onChange={(e) =>
-                          setFormData({ ...formData, rate: e.target.value })
-                        }
-                      />
+              <CardContent className="pt-8">
+                <form onSubmit={handleSubmitMaterial} className="space-y-8">
+                  {/* Shop Details Section */}
+                  <div className="bg-white rounded-lg p-4 border border-gray-200">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">🏪 Your Shop</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="font-semibold text-gray-700">
+                          Shop <Required />
+                        </Label>
+                        {user?.role === 'supplier' ? (
+                          <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-200 font-medium text-gray-800">{shopName}</div>
+                        ) : (
+                          <Select value={selectedShop} onValueChange={setSelectedShop}>
+                            <SelectTrigger className="mt-2">
+                              <SelectValue placeholder="Select a shop" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {shops.map((shop) => (
+                                <SelectItem key={shop.id} value={shop.id}>
+                                  {shop.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Unit and Brand Name */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>
-                        Unit <Required />
-                      </Label>
-                      <Select
-                        value={formData.unit}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, unit: value })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {UNIT_OPTIONS.map((unit) => (
-                            <SelectItem key={unit} value={unit}>
-                              {unit}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {/* Essential Details Section */}
+                  <div className="bg-white rounded-lg p-4 border border-gray-200">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">💰 Essential Details</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="font-semibold text-gray-700">
+                          Rate <Required />
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="Enter rate"
+                          value={formData.rate}
+                          onChange={(e) =>
+                            setFormData({ ...formData, rate: e.target.value })
+                          }
+                          className="mt-2"
+                        />
+                      </div>
 
-                    <div>
-                      <Label>Brand Name</Label>
-                      <Input
-                        placeholder="Enter brand name"
-                        value={formData.brandname}
-                        onChange={(e) =>
-                          setFormData({ ...formData, brandname: e.target.value })
-                        }
-                      />
+                      <div>
+                        <Label className="font-semibold text-gray-700">
+                          Unit <Required />
+                        </Label>
+                        <Select
+                          value={formData.unit}
+                          onValueChange={(value) =>
+                            setFormData({ ...formData, unit: value })
+                          }
+                        >
+                          <SelectTrigger className="mt-2">
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UNIT_OPTIONS.map((unit) => (
+                              <SelectItem key={unit} value={unit}>
+                                {unit}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <Label className="font-semibold text-gray-700">Brand Name</Label>
+                        <Input
+                          placeholder="Enter brand name (optional)"
+                          value={formData.brandname}
+                          onChange={(e) =>
+                            setFormData({ ...formData, brandname: e.target.value })
+                          }
+                          className="mt-2"
+                        />
+                      </div>
                     </div>
                   </div>
 
                   {/* Model Number and Category */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Model Number</Label>
-                      <Input
-                        placeholder="Enter model number"
-                        value={formData.modelnumber}
-                        onChange={(e) =>
-                          setFormData({ ...formData, modelnumber: e.target.value })
-                        }
-                      />
-                    </div>
+                  {user?.role !== 'supplier' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label>Model Number</Label>
+                        <Input
+                          placeholder="Enter model number"
+                          value={formData.modelnumber}
+                          onChange={(e) =>
+                            setFormData({ ...formData, modelnumber: e.target.value })
+                          }
+                        />
+                      </div>
 
-                    <div>
-                      <Label>
-                        Category <Required />
-                      </Label>
-                      <Select
-                        value={formData.category}
-                        onValueChange={(value) => {
-                          setFormData({ ...formData, category: value, subcategory: "" });
-                          loadSubcategories(value);
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map((cat) => (
-                            <SelectItem key={cat} value={cat}>
-                              {cat}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  {/* Subcategory */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label>Subcategory</Label>
-                      <Select
-                        value={formData.subcategory}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, subcategory: value, product: "" })
-                        }
-                        disabled={!formData.category || subcategories.length === 0}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={subcategories.length === 0 ? "No subcategories available" : "Select subcategory"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {subcategories.map((subcat) => (
-                            <SelectItem key={subcat} value={subcat}>
-                              {subcat}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>Product</Label>
-                      <Select
-                        value={formData.product}
-                        onValueChange={(value) =>
-                          setFormData({ ...formData, product: value })
-                        }
-                        disabled={!formData.subcategory || products.length === 0}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={products.length === 0 ? "No products available" : "Select product"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products
-                            .filter((product: any) => product.subcategory === formData.subcategory)
-                            .map((product: any) => (
-                              <SelectItem key={product.id} value={product.name}>
-                                {product.name} {"(Subcategory: "}{product.subcategory_name}{")"}
+                      <div>
+                        <Label>
+                          Category <Required />
+                        </Label>
+                        <Select
+                          value={formData.category}
+                          onValueChange={(value) => {
+                            setFormData({ ...formData, category: value, subcategory: "" });
+                            loadSubcategories(value);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.map((cat) => (
+                              <SelectItem key={cat} value={cat}>
+                                {cat}
                               </SelectItem>
                             ))}
-                        </SelectContent>
-                      </Select>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Subcategory */}
+                  {user?.role !== 'supplier' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <Label>Subcategory</Label>
+                        <Select
+                          value={formData.subcategory}
+                          onValueChange={(value) =>
+                            setFormData({ ...formData, subcategory: value, product: "" })
+                          }
+                          disabled={!formData.category || subcategories.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={subcategories.length === 0 ? "No subcategories available" : "Select subcategory"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {subcategories.map((subcat) => (
+                              <SelectItem key={subcat} value={subcat}>
+                                {subcat}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label>Product</Label>
+                        <Select
+                          value={formData.product}
+                          onValueChange={(value) =>
+                            setFormData({ ...formData, product: value })
+                          }
+                          disabled={!formData.subcategory || products.length === 0}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={products.length === 0 ? "No products available" : "Select product"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {products
+                              .filter((product: any) => product.subcategory === formData.subcategory)
+                              .map((product: any) => (
+                                <SelectItem key={product.id} value={product.name}>
+                                  {product.name} {"(Subcategory: "}{product.subcategory_name}{")"}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Technical Specification */}
-                  <div>
-                    <Label>Technical Specification</Label>
-                    <Textarea
-                      placeholder="Enter technical specifications"
-                      value={formData.technicalspecification}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          technicalspecification: e.target.value,
-                        })
-                      }
-                      rows={4}
-                    />
-                  </div>
+                  {user?.role !== 'supplier' && (
+                    <div>
+                      <Label>Technical Specification</Label>
+                      <Textarea
+                        placeholder="Enter technical specifications"
+                        value={formData.technicalspecification}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            technicalspecification: e.target.value,
+                          })
+                        }
+                        rows={4}
+                      />
+                    </div>
+                  )}
 
                   {/* Dimensions, Finish Type, Metal Type */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <Label>Dimensions</Label>
-                      <Input
-                        placeholder="Enter dimensions"
-                        value={formData.dimensions}
-                        onChange={(e) =>
-                          setFormData({ ...formData, dimensions: e.target.value })
-                        }
-                      />
-                    </div>
+                  {user?.role !== 'supplier' && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <Label>Dimensions</Label>
+                        <Input
+                          placeholder="Enter dimensions"
+                          value={formData.dimensions}
+                          onChange={(e) =>
+                            setFormData({ ...formData, dimensions: e.target.value })
+                          }
+                        />
+                      </div>
 
-                    <div>
-                      <Label>Finish Type</Label>
-                      <Input
-                        placeholder="e.g., matte, glossy, satin"
-                        value={formData.finishtype}
-                        onChange={(e) =>
-                          setFormData({ ...formData, finishtype: e.target.value })
-                        }
-                      />
-                    </div>
+                      <div>
+                        <Label>Finish Type</Label>
+                        <Input
+                          placeholder="e.g., matte, glossy, satin"
+                          value={formData.finishtype}
+                          onChange={(e) =>
+                            setFormData({ ...formData, finishtype: e.target.value })
+                          }
+                        />
+                      </div>
 
-                    <div>
-                      <Label>Metal Type</Label>
-                      <Input
-                        placeholder="e.g., steel, copper, aluminum"
-                        value={formData.metaltype}
-                        onChange={(e) =>
-                          setFormData({ ...formData, metaltype: e.target.value })
-                        }
-                      />
+                      <div>
+                        <Label>Metal Type</Label>
+                        <Input
+                          placeholder="e.g., steel, copper, aluminum"
+                          value={formData.metaltype}
+                          onChange={(e) =>
+                            setFormData({ ...formData, metaltype: e.target.value })
+                          }
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Entries List (if any) */}
                   {entriesList.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="font-medium">Entries to submit ({entriesList.length})</div>
-                      <div className="space-y-1">
+                    <div className="bg-white rounded-lg p-4 border border-green-200 bg-green-50">
+                      <div className="font-semibold text-green-800 mb-4 flex items-center gap-2">
+                        ✅ Entries to submit ({entriesList.length})
+                      </div>
+                      <div className="space-y-2">
                         {entriesList.map((entry, idx) => (
-                          <div key={idx} className="flex items-center justify-between border rounded px-3 py-2 bg-white">
+                          <div key={idx} className="flex items-center justify-between border rounded-lg px-4 py-3 bg-white border-green-300 hover:bg-green-50 transition">
                             <div className="text-sm">
-                              <div className="font-semibold">Rate: {entry.rate} • Unit: {entry.unit}</div>
-                              <div className="text-xs text-muted-foreground">Category: {entry.category} {entry.subcategory ? `• ${entry.subcategory}` : ''} {entry.product ? `• ${entry.product}` : ''}</div>
+                              <div className="font-semibold text-gray-800">💵 Rate: {entry.rate} • 📏 Unit: {entry.unit}</div>
+                              <div className="text-xs text-gray-600 mt-1">{entry.brandname ? `🏷️ ${entry.brandname}` : ''}</div>
                             </div>
                             <div className="flex items-center gap-2">
-                              <Button size="sm" variant="ghost" onClick={() => {
-                                // populate entry into form for quick edit
+                              <Button size="sm" variant="outline" onClick={() => {
                                 setFormData({
                                   rate: entry.rate,
                                   unit: entry.unit,
@@ -713,7 +817,7 @@ export default function SupplierMaterials() {
                                   metaltype: entry.metaltype || "",
                                 });
                               }}>Edit</Button>
-                              <Button size="sm" variant="ghost" onClick={() => handleRemoveEntry(idx)}>Remove</Button>
+                              <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => handleRemoveEntry(idx)}>Remove</Button>
                             </div>
                           </div>
                         ))}
@@ -722,27 +826,28 @@ export default function SupplierMaterials() {
                   )}
 
                   {/* Submit / Add Entry Buttons */}
-                  <div className="flex gap-2">
-                    <Button type="button" onClick={handleAddEntry} className="gap-2">
-                      <Plus className="w-4 h-4" /> Add Entry
+                  <div className="flex gap-3 pt-4 border-t">
+                    <Button type="button" onClick={handleAddEntry} variant="outline" className="gap-2 border-blue-300 hover:bg-blue-50 text-blue-700">
+                      <Plus className="w-4 h-4" /> Add Another Entry
                     </Button>
 
                     <Button
                       type="submit"
                       disabled={submitting}
-                      className="gap-2"
+                      className="gap-2 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-semibold"
                     >
                       {submitting ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
-                        <Plus className="w-4 h-4" />
+                        "✓"
                       )}
-                      Submit for Approval
+                      {submitting ? "Submitting..." : "Submit for Approval"}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => setSelectedTemplate(null)}
+                      className="gap-2 text-gray-700 hover:bg-gray-100"
                     >
                       Cancel
                     </Button>
@@ -752,122 +857,9 @@ export default function SupplierMaterials() {
             </Card>
           )}
 
-          {/* Technical Support Section */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <MessageSquare className="w-5 h-5" />
-              <h2 className="text-2xl font-semibold">Technical Support</h2>
-            </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Send Message to Admin & Software Team</CardTitle>
-                <CardDescription>
-                  Request new categories or report issues
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Sender Name Input */}
-                <div className="space-y-2">
-                  <Label>Your Name <Required /></Label>
-                  <Input
-                    placeholder="Enter your name..."
-                    value={supportSenderName}
-                    onChange={(e) => setSupportSenderName(e.target.value)}
-                  />
-                </div>
-
-                {/* Additional Info Input */}
-                <div className="space-y-2">
-                  <Label>Additional Information (Optional)</Label>
-                  <Textarea
-                    placeholder="Any additional context or details..."
-                    className="min-h-[80px]"
-                    value={supportSenderInfo}
-                    onChange={(e) => setSupportSenderInfo(e.target.value)}
-                  />
-                </div>
-
-                {/* Message Input */}
-                <div className="space-y-2">
-                  <Label>Message / Request <Required /></Label>
-                  <Textarea
-                    placeholder="I need a new category for 'Smart Home Devices'..."
-                    className="min-h-[150px]"
-                    value={supportMsg}
-                    onChange={(e) => setSupportMsg(e.target.value)}
-                  />
-                </div>
-
-                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded text-sm text-blue-700 dark:text-blue-300">
-                  ✓ This message will be sent to Admin & Software Team
-                </div>
-
-                <Button
-                  onClick={handleSupportSubmit}
-                >
-                  <MessageSquare className="mr-2 h-4 w-4" /> Send Request
-                </Button>
-
-                {/* Display list of sent messages */}
-                {((supportMessages || []).filter((msg: any) => msg.sender_name === supportSenderName)).length === 0 ? (
-                  <p className="text-muted-foreground text-sm mt-4">No messages sent yet</p>
-                ) : (
-                  <div className="mt-6 space-y-3">
-                    <p className="font-semibold text-sm">Your Sent Messages:</p>
-                    {(supportMessages || []).filter((msg: any) => msg.sender_name === supportSenderName).map((msg: any) => (
-                      <Card key={msg.id} className="border-border/50">
-                        <CardContent className="pt-6 space-y-3">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <p className="text-sm text-muted-foreground">
-                                Sent: {new Date(msg.sent_at || msg.sentAt).toLocaleString()}
-                              </p>
-                              {msg.info && (
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  <span className="font-semibold">Info: </span>{msg.info}
-                                </p>
-                              )}
-                            </div>
-                            {user?.role === 'supplier' && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  (async () => {
-                                    try {
-                                      await deleteMessage?.(msg.id);
-                                      toast({
-                                        title: "Success",
-                                        description: "Message deleted",
-                                      });
-                                    } catch (err) {
-                                      toast({
-                                        title: "Error",
-                                        description: "Failed to delete message",
-                                        variant: "destructive",
-                                      });
-                                    }
-                                  })();
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4 text-red-500" />
-                              </Button>
-                            )}
-                          </div>
-                          <p className="text-sm leading-relaxed bg-muted/50 p-3 rounded">
-                            {msg.message}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
         </div>
       </div>
-    </Layout>
+    </LayoutComponent>
   );
 }

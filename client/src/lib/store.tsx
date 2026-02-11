@@ -1,11 +1,31 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { getJSON, postJSON, apiFetch } from "./api";
+import { useAuth } from "./auth-context";
 
 export type Role = "admin" | "supplier" | "user" | "purchase_team" | "software_team" | "pre_sales" | "contractor";
 
-export interface User { id: string; name?: string; email?: string; role: Role; shopId?: string }
-export interface Shop { id: string; name: string; location?: string; phoneCountryCode?: string; contactNumber?: string; city?: string; state?: string; country?: string; pincode?: string; image?: string; rating?: number; categories?: string[]; gstNo?: string; ownerId?: string; disabled?: boolean }
-export interface Material { id: string; name: string; code: string; rate: number; shopId?: string; unit?: string; category?: string; brandName?: string; modelNumber?: string; subCategory?: string; product?: string; technicalSpecification?: string; dimensions?: string; finish?: string; metalType?: string; image?: string; attributes?: any; masterMaterialId?: string; disabled?: boolean }
+export interface User { 
+  id: string; 
+  username: string;
+  role: Role; 
+  approved?: string;
+  approvalReason?: string;
+  fullName?: string;
+  mobileNumber?: string;
+  department?: string;
+  employeeCode?: string;
+  companyName?: string;
+  gstNumber?: string;
+  businessAddress?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  shopId?: string;
+  // Legacy fields for backward compatibility
+  name?: string; 
+  email?: string; 
+}
+export interface Shop { id: string; name: string; location?: string; phoneCountryCode?: string; contactNumber?: string; city?: string; state?: string; country?: string; pincode?: string; image?: string; rating?: number; categories?: string[]; gstNo?: string; vendorCategory?: string; ownerId?: string; disabled?: boolean }
+export interface Material { id: string; name: string; code: string; rate: number; shopId?: string; unit?: string; category?: string; brandName?: string; modelNumber?: string; subCategory?: string; product?: string; technicalSpecification?: string; dimensions?: string; finish?: string; metalType?: string; image?: string; attributes?: any; masterMaterialId?: string; disabled?: boolean; vendorCategory?: string; taxCodeType?: 'hsn' | 'sac'; taxCodeValue?: string; }
 export interface Product { id: string; name: string; subcategory?: string; category?: string; subcategory_name?: string; category_name?: string; created_at?: string; created_by?: string }
 
 interface DataContextType {
@@ -37,6 +57,9 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: ReactNode }) {
+  // Get auth user and sync it with data store user
+  const authContext = useAuth();
+  
   const [user, setUser] = useState<User | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -52,6 +75,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [materialApprovalRequests, setMaterialApprovalRequests] = useState<any[]>([]);
   const [flushAttemptCount, setFlushAttemptCount] = useState(0);
   const [lastFlushTime, setLastFlushTime] = useState(0);
+
+  /* =========================
+     SYNC AUTH USER WITH DATA STORE USER
+  ========================= */
+  useEffect(() => {
+    if (authContext?.user) {
+      setUser(authContext.user as User);
+    }
+  }, [authContext?.user]);
 
   // Helper function to normalize server material keys (snake_case) to client camelCase
   const normalizeMaterial = (mat: any) => ({
@@ -70,10 +102,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     image: mat.image,
     attributes: mat.attributes || {},
     disabled: mat.disabled || false,
+    vendorCategory: mat.vendor_category || mat.vendorCategory || "",
+    taxCodeType: mat.tax_code_type || mat.taxCodeType || null,
+    taxCodeValue: mat.tax_code_value || mat.taxCodeValue || "",
   } as Material);
 
   useEffect(() => {
-    let mounted = true;
+    let mounted = true;                                                     
     (async () => {
       try {
         const s = await getJSON('/shops');

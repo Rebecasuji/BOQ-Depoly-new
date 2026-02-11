@@ -87,6 +87,8 @@ export async function seedMaterialCategories(): Promise<void> {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name VARCHAR(255) UNIQUE NOT NULL,
         subcategory TEXT NOT NULL,
+        tax_code_type VARCHAR(10) DEFAULT NULL CHECK (tax_code_type IN ('hsn', 'sac')),
+        tax_code_value VARCHAR(255) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_by VARCHAR(255)
       )
@@ -94,6 +96,8 @@ export async function seedMaterialCategories(): Promise<void> {
 
     // Add subcategory column if it doesn't exist (for existing tables)
     await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS subcategory TEXT NOT NULL`);
+    await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10) DEFAULT NULL CHECK (tax_code_type IN ('hsn', 'sac'))`);
+    await query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(255) DEFAULT NULL`);
 
     console.log('[seed-categories] ✓ products table ready');
 

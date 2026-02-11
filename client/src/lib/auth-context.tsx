@@ -21,6 +21,17 @@ interface User {
   id: string;
   username: string;
   role: UserRole;
+  approved?: string;
+  approvalReason?: string;
+  fullName?: string;
+  mobileNumber?: string;
+  department?: string;
+  employeeCode?: string;
+  companyName?: string;
+  gstNumber?: string;
+  businessAddress?: string;
+  createdAt?: string;
+  updatedAt?: string;
   shopId?: string;
 }
 
@@ -68,6 +79,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(stored);
     }
   }, []);
+
+  /* =========================
+     RESTORE USER FROM TOKEN
+     - Fetch user profile if token exists
+  ========================= */
+  useEffect(() => {
+    const restoreUser = async () => {
+      if (token) {
+        try {
+          const res = await fetch(`${API_BASE}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const userData = await res.json();
+            setUser(userData);
+          } else {
+            // Token invalid, clear it
+            setToken(null);
+            localStorage.removeItem("authToken");
+          }
+        } catch (err) {
+          console.warn("Failed to restore user from token", err);
+        }
+      }
+    };
+    restoreUser();
+  }, [token]);
 
   /* =========================
      SYNC TOKEN

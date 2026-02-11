@@ -18,6 +18,7 @@ import PurchaseDashboard from "@/pages/PurchaseDashboard";
 import SupplierDashboard from "@/pages/SupplierDashboard";
 
 import AdminDashboard from "@/pages/admin/AdminDashboard";
+import ManageMaterialsPage from "@/pages/admin/ManageMaterialsPage";
 import SupplierApproval from "@/pages/SupplierApproval";
 import MaterialSubmissionApproval from "@/pages/admin/MaterialSubmissionApproval";
 
@@ -42,6 +43,7 @@ import CreateProject from "@/pages/CreateProject";
 
 import SupplierMaterials from "@/pages/supplier/SupplierMaterials";
 import SupplierShops from "@/pages/supplier/SupplierShops";
+import { SupplierSupport } from "@/pages/supplier/SupplierSupport";
 
 function Router() {
   return (
@@ -95,6 +97,7 @@ function Router() {
 
       {/* ================= ADMIN ================= */}
       <Route path="/admin/dashboard" component={AdminDashboard} />
+      <Route path="/admin/manage-materials" component={ManageMaterialsPage} />
 
       {/* ✅ Supplier Approval (MAIN) */}
       <Route path="/admin/supplier-approval" component={SupplierApproval} />
@@ -110,6 +113,8 @@ function Router() {
       {/* ================= SUPPLIER ================= */}
       <Route path="/supplier/shops" component={SupplierShops} />
       <Route path="/supplier/materials" component={SupplierMaterials} />
+      <Route path="/supplier/support" component={() => <SupplierSupport />} />
+      <Route path="/supplier/dashboard" component={SupplierDashboard} />
 
       {/* ================= FALLBACK ================= */}
       <Route component={NotFound} />

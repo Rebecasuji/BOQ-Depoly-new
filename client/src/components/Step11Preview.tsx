@@ -106,7 +106,7 @@ export default function Step11Preview({
       }
     };
 
-    loadStep11Data();
+    loadStep11Data();     
   }, [product, toast]);
 
   const getEstimatorTypeFromProduct = (prod: Product): string | null => {

@@ -123,7 +123,7 @@ app.use((req, res, next) => {
     () => {
       log(`Serving on http://localhost:${port}`);
     },
-  );
+  );    
 
   console.log("[index] httpServer.listen() called (async)");
 })();
