@@ -10,6 +10,7 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import PendingApproval from "@/pages/PendingApproval";
 
 import Dashboard from "@/pages/Dashboard";
@@ -52,6 +53,7 @@ function Router() {
       <Route path="/" component={Login} />
       <Route path="/signup" component={Signup} />
       <Route path="/forgot-password" component={ForgotPassword} />
+      <Route path="/reset-password" component={ResetPassword} />
 
       {/* ✅ Pending approval page (MAIN) */}
       <Route path="/pending-approval" component={PendingApproval} />

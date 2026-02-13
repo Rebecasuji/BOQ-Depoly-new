@@ -121,7 +121,7 @@ app.use((req, res, next) => {
       host,
     },
     () => {
-      log(`Serving on http://localhost:${port}`);
+      log(`🚀 Server running on http://localhost:${port}`);
     },
   );    
 

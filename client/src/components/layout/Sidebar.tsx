@@ -89,13 +89,13 @@ export function Sidebar() {
         if (response.ok) {
           const data = await response.json();
           const items = data.subcategories || [];
-          
+
           // Map subcategories to items with icons
           const mappedItems = items.map((item: SubcategoryItem) => ({
             ...item,
             icon: iconMap[item.icon] || Layers,
           }));
-          
+
           setSubcategories(mappedItems);
         }
       } catch (error) {
@@ -114,10 +114,10 @@ export function Sidebar() {
     };
 
     loadSubcategories();
-    
+
     // Refresh subcategories every 30 seconds to pick up new database entries
     const interval = setInterval(loadSubcategories, 30000);
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -207,8 +207,8 @@ export function Sidebar() {
 
   const filteredEstimators = estSearch
     ? subcategories.filter((item: any) =>
-        (item.name || item.label).toLowerCase().includes(estSearch.toLowerCase()),
-      )
+      (item.name || item.label).toLowerCase().includes(estSearch.toLowerCase()),
+    )
     : subcategories;
 
   return (
@@ -473,14 +473,13 @@ export function Sidebar() {
           )}
 
           {!isPreSales && !isContractor && (user?.role === "supplier" ||
-          user?.role === "purchase_team" ||
-          user?.role === "admin") ? (
+            user?.role === "admin") ? (
             <>
               <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 {user?.role === "admin" ? "Materials" : "Supplier"}
               </div>
               {user?.role === "supplier" && (
-                <Link href="/supplier/shops">        
+                <Link href="/supplier/shops">
                   <span
                     className={cn(
                       "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
@@ -494,7 +493,7 @@ export function Sidebar() {
                   </span>
                 </Link>
               )}
-              {(user?.role !== 'admin') && (
+              {(user?.role === 'supplier') && (
                 <Link href="/supplier/materials">
                   <span
                     className={cn(
@@ -526,27 +525,29 @@ export function Sidebar() {
                   className="w-full rounded-md border px-2 py-1 text-sm bg-transparent text-sidebar-foreground placeholder:text-muted-foreground"
                 />
               </div>
-              {filteredEstimators.map((item: any) => {
-                // Generate href for database-only items (those without predefined href)
-                const itemHref = item.href || `/estimators/${item.name.toLowerCase().replace(/\s+/g, '')}`;
-                const Icon = item.icon;
-                return (
-                  <Link key={item.id || itemHref} href={itemHref}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                        location === itemHref
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                      )}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      {Icon && <Icon className="h-4 w-4" />}
-                      {item.name || item.label}
-                    </div>
-                  </Link>
-                );
-              })}
+              <div className="max-h-[260px] overflow-y-auto pr-1">
+                {filteredEstimators.map((item: any) => {
+                  // Generate href for database-only items (those without predefined href)
+                  const itemHref = item.href || `/estimators/${(item.name || item.label).toLowerCase().replace(/[\s/]+/g, '-')}`;
+                  const Icon = item.icon;
+                  return (
+                    <Link key={item.id || itemHref} href={itemHref}>
+                      <div
+                        className={cn(
+                          "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                          location === itemHref
+                            ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-md"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        )}
+                        onClick={() => setIsOpen(false)}
+                      >
+                        {Icon && <Icon className="h-4 w-4" />}
+                        {item.name || item.label}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             </>
           )}
 
@@ -554,13 +555,13 @@ export function Sidebar() {
           {!isPreSales && !isContractor && (
             <>
               <div className="mt-6 px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Resources
+                Resources
               </div>
               <Link href="/subscription">
                 <span className="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent cursor-pointer">
                   <Package className="h-4 w-4" />
                   Subscription
-                </span>           
+                </span>
               </Link>
             </>
           )}
@@ -579,7 +580,7 @@ export function Sidebar() {
               </span>
               <span className="text-xs text-muted-foreground truncate capitalize">
                 {user?.role?.replace("_", " ") || "Visitor"}
-              </span>                                              
+              </span>
             </div>
           </div>
           <Button

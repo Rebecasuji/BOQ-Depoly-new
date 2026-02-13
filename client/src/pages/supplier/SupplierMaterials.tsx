@@ -250,14 +250,14 @@ export default function SupplierMaterials() {
         // First try to get approved materials
         const res = await fetch('/api/materials');
         let found = null;
-        
+
         if (res.ok) {
           const data = await res.json();
           const materials = data.materials || [];
           // find material by template_id and shop_id
           found = materials.find((m: any) => String(m.template_id) === String(selectedTemplate.id) && String(m.shop_id) === String(selectedShop));
         }
-        
+
         // If not found in approved, check user's submissions
         if (!found) {
           const submissionRes = await fetch('/api/my-material-submissions');
@@ -268,7 +268,7 @@ export default function SupplierMaterials() {
             found = submissions.find((s: any) => String(s.template_id) === String(selectedTemplate.id) && String(s.shop_id) === String(selectedShop));
           }
         }
-        
+
         if (found) {
           // Prefill form fields with the existing material's values (set empty string when not provided)
           setFormData(() => ({

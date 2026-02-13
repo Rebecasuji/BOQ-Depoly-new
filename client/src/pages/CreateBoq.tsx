@@ -242,28 +242,9 @@ export default function CreateBoq() {
           console.error("Failed to fetch BOQ items:", response.status, body);
           toast({ title: "Error", description: `Failed to load BOQ items (${response.status})`, variant: "destructive" });
         }
-
-        // Load edited fields from this version
-        const editsResponse = await apiFetch(
-          `/api/boq-versions/${encodeURIComponent(selectedVersionId)}/edits`,
-          { headers: {} },
-        );
-        if (editsResponse.ok) {
-          try {
-            const editsData = await safeParseJson(editsResponse as unknown as Response);
-            setEditedFields(editsData.editedFields || {});
-          } catch (e) {
-            // Don't show a destructive toast here — the edits response may be empty
-            // or served without Content-Type in some dev setups. Log warning for diagnostics.
-            console.warn("Edits parse warning (non-fatal):", e);
-          }
-        } else {
-          const body = await editsResponse.text();
-          console.error("Failed to fetch edits:", editsResponse.status, body);
-        }
       } catch (err) {
-        console.error("Failed to load BOQ items or edits:", err);
-        toast({ title: "Error", description: "Failed to load BOQ items or edits", variant: "destructive" });
+        console.error("Failed to load BOQ items:", err);
+        toast({ title: "Error", description: "Failed to load BOQ items", variant: "destructive" });
       }
     };
 
@@ -542,7 +523,7 @@ export default function CreateBoq() {
   ) => {
     return (
       editedFields[itemKey]?.[
-        field as keyof (typeof editedFields)[keyof typeof editedFields]
+      field as keyof (typeof editedFields)[keyof typeof editedFields]
       ] ?? originalValue
     );
   };
@@ -561,9 +542,28 @@ export default function CreateBoq() {
       );
 
       if (response.ok) {
+        // Clear edited fields since they're now saved in the database
+        setEditedFields({});
+
+        // Reload BOQ items to show the saved edits
+        try {
+          const loadResponse = await apiFetch(
+            `/api/boq-items/version/${encodeURIComponent(selectedVersionId)}`,
+            { headers: {} },
+          );
+          if (loadResponse.ok) {
+            const data = await loadResponse.json();
+            setBoqItems(data.items || []);
+            console.log("BOQ items reloaded after save:", data.items?.length || 0);
+          }
+        } catch (loadErr) {
+          console.error("Failed to reload BOQ items after save:", loadErr);
+          // Non-fatal - the save succeeded, just the reload failed
+        }
+
         toast({
           title: "Success",
-          description: "BOQ version saved permanently with all edits",
+          description: "Draft saved",
         });
       } else {
         throw new Error("Failed to save edits");
@@ -1242,7 +1242,7 @@ export default function CreateBoq() {
                         <th colSpan={5}></th>
                         <th className="border px-1 py-1 text-center text-xs font-medium w-14">
                           Supply
-                        </th>                     
+                        </th>
                         <th className="border px-1 py-1 text-center text-xs font-medium w-14">
                           Install
                         </th>

@@ -5,6 +5,9 @@ import { comparePasswords, generateToken } from "./auth";
 import { authMiddleware, requireRole } from "./middleware";
 import { randomUUID } from "crypto";
 import { query } from "./db/client";
+import { sendResetPasswordEmail } from "./email";
+import crypto from "crypto";
+import bcryptjs from "bcryptjs";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -494,7 +497,7 @@ export async function registerRoutes(
         detail: error?.detail,
         fullError: error,
       });
-      
+
       // Provide more specific error messages
       if (error.code === "23505") {
         // Unique constraint violation
@@ -539,9 +542,8 @@ export async function registerRoutes(
           return;
         } else if (user.approved === "rejected") {
           res.status(403).json({
-            message: `Account rejected: ${
-              user.approvalReason || "No reason provided"
-            }`,
+            message: `Account rejected: ${user.approvalReason || "No reason provided"
+              }`,
           });
           return;
         }
@@ -595,21 +597,116 @@ export async function registerRoutes(
         return;
       }
 
-      // TODO: Implement actual password reset logic
-      // - Generate reset token
-      // - Store token with expiry
-      // - Send email with reset link
+      // Generate reset token
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const resetTokenHash = crypto
+        .createHash("sha256")
+        .update(resetToken)
+        .digest("hex");
+      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
 
-      // For now, just return success
-      console.log(`Password reset requested for: ${email}`);
-      res
-        .status(200)
-        .json({ message: "Password reset link sent to your email" });
+      // Save reset token to database
+      try {
+        await query(
+          `UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3`,
+          [resetTokenHash, resetTokenExpiry, user.id]
+        );
+      } catch (err) {
+        console.error("Failed to save reset token:", err);
+        // Column might not exist, try to add it
+        try {
+          await query(
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255)`
+          );
+          await query(
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expiry TIMESTAMP`
+          );
+          await query(
+            `UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3`,
+            [resetTokenHash, resetTokenExpiry, user.id]
+          );
+        } catch (alterErr) {
+          console.error("Failed to alter table:", alterErr);
+          throw alterErr;
+        }
+      }
+
+      // Send email with reset link
+      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+      const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
+
+      try {
+        await sendResetPasswordEmail(email, resetLink);
+      } catch (emailErr) {
+        console.error("Failed to send email:", emailErr);
+        res.status(500).json({
+          message:
+            "Failed to send reset email. Please try again later.",
+        });
+        return;
+      }
+
+      res.status(200).json({
+        message: "Password reset link sent to your email",
+      });
     } catch (error) {
       console.error("Forgot password error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
+  // POST /api/auth/reset-password - Reset password with token
+  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        res.status(400).json({
+          message: "Token and new password are required",
+        });
+        return;
+      }
+
+      // Hash the token to compare with stored hash
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(token)
+        .digest("hex");
+
+      // Find user with matching token and valid expiry
+      const userResult = await query(
+        `SELECT id, username FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
+        [tokenHash]
+      );
+
+      if (userResult.rows.length === 0) {
+        res.status(400).json({
+          message:
+            "Invalid or expired reset token. Please request a new password reset.",
+        });
+        return;
+      }
+
+      const userId = userResult.rows[0].id;
+
+      // Hash the new password
+      const hashedPassword = await bcryptjs.hash(newPassword, 10);
+
+      // Update password and clear reset token
+      await query(
+        `UPDATE users SET password = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2`,
+        [hashedPassword, userId]
+      );
+
+      res.status(200).json({
+        message: "Password has been reset successfully. Please log in with your new password.",
+      });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
 
   // ====== PROTECTED ROUTES ======
 
@@ -1817,7 +1914,7 @@ export async function registerRoutes(
     async (req: Request, res: Response) => {
       try {
         const id = req.params.id;
-        
+
         // Simply delete the subcategory
         // Note: CASCADE DELETE should be handled at the database level
         // OR we trust that products are orphaned (which is acceptable for now)
@@ -1825,12 +1922,12 @@ export async function registerRoutes(
           "DELETE FROM material_subcategories WHERE id = $1 RETURNING id",
           [id],
         );
-        
+
         if (result.rowCount === 0) {
           res.status(404).json({ message: "Subcategory not found" });
           return;
         }
-        
+
         res.json({ message: "Subcategory deleted successfully" });
       } catch (err: any) {
         console.error("/api/subcategories DELETE error:", {
@@ -1838,8 +1935,8 @@ export async function registerRoutes(
           code: err.code,
           detail: err.detail
         });
-        res.status(500).json({ 
-          message: "failed to delete subcategory", 
+        res.status(500).json({
+          message: "failed to delete subcategory",
           error: err.message
         });
       }
@@ -1958,7 +2055,7 @@ export async function registerRoutes(
         WHERE TRIM(name) != ''
         ORDER BY name ASC
       `);
-      
+
       const dbSubcategoryNames = dbResult.rows.map((row) => row.name);
 
       // Create a set of predefined names (normalized for comparison)
@@ -2786,6 +2883,116 @@ export async function registerRoutes(
     },
   );
 
+  // POST /api/boq-versions/:versionId/save-edits - Save edited fields for BOQ items in a version
+  app.post(
+    "/api/boq-versions/:versionId/save-edits",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { versionId } = req.params;
+        const { editedFields } = req.body;
+
+        if (!editedFields || typeof editedFields !== 'object') {
+          res.status(400).json({ message: "editedFields object is required" });
+          return;
+        }
+
+        console.log(`[save-edits] Saving edits for version ${versionId}`, {
+          editCount: Object.keys(editedFields).length,
+          editKeys: Object.keys(editedFields),
+          sample: Object.keys(editedFields).length > 0 ? editedFields[Object.keys(editedFields)[0]] : null
+        });
+
+        // editedFields structure: { "itemId-itemIdx": { field: value, ... }, ... }
+        // We need to get all BOQ items for this version and update their table_data
+
+        // Get all BOQ items for this version
+        const itemsResult = await query(
+          `SELECT id, table_data FROM boq_items WHERE version_id = $1`,
+          [versionId]
+        );
+
+        if (itemsResult.rows.length === 0) {
+          console.log(`[save-edits] No BOQ items found for version ${versionId}`);
+          res.status(404).json({ message: "No BOQ items found for this version" });
+          return;
+        }
+
+        console.log(`[save-edits] Found ${itemsResult.rows.length} BOQ items for version ${versionId}`);
+
+        let totalUpdated = 0;
+
+        // Process each BOQ item and apply edits
+        for (const row of itemsResult.rows) {
+          const itemId = row.id;
+          const tableData = typeof row.table_data === 'string'
+            ? JSON.parse(row.table_data)
+            : row.table_data;
+
+          console.log(`[save-edits] Processing item ${itemId}`, {
+            hasStep11Items: !!tableData.step11_items,
+            step11ItemsCount: tableData.step11_items?.length || 0
+          });
+
+          if (!tableData.step11_items || !Array.isArray(tableData.step11_items)) {
+            console.log(`[save-edits] Skipping item ${itemId} - no step11_items array`);
+            continue;
+          }
+
+          let hasChanges = false;
+
+          // Apply edits to step11_items
+          tableData.step11_items.forEach((step11Item: any, itemIdx: number) => {
+            const itemKey = `${itemId}-${itemIdx}`;
+            const editsForThisItem = editedFields[itemKey];
+
+            if (editsForThisItem) {
+              console.log(`[save-edits] Applying edits for ${itemKey}:`, {
+                edits: editsForThisItem,
+                originalValues: {
+                  qty: step11Item.qty,
+                  supply_rate: step11Item.supply_rate,
+                  install_rate: step11Item.install_rate
+                }
+              });
+
+              // Apply each edited field
+              Object.keys(editsForThisItem).forEach(fieldName => {
+                const oldValue = step11Item[fieldName];
+                const newValue = editsForThisItem[fieldName];
+                step11Item[fieldName] = newValue;
+                hasChanges = true;
+                console.log(`[save-edits]   Field '${fieldName}': ${oldValue} → ${newValue}`);
+              });
+            }
+          });
+
+          // Update the database if this item has changes
+          if (hasChanges) {
+            await query(
+              `UPDATE boq_items SET table_data = $1 WHERE id = $2`,
+              [JSON.stringify(tableData), itemId]
+            );
+            totalUpdated++;
+            console.log(`[save-edits] ✅ Updated BOQ item ${itemId} in database`);
+          } else {
+            console.log(`[save-edits] ⏭️  No changes for item ${itemId}`);
+          }
+        }
+
+        console.log(`[save-edits] Completed: ${totalUpdated} items updated`);
+        res.json({
+          message: "Edits saved successfully",
+          itemsUpdated: totalUpdated
+        });
+      } catch (err) {
+        console.error("POST /api/boq-versions/:versionId/save-edits error", err);
+        res.status(500).json({ message: "Failed to save edits" });
+      }
+    }
+  );
+
+
   // DELETE /api/boq-versions/:versionId - Delete a version and its items
   app.delete(
     "/api/boq-versions/:versionId",
@@ -2900,7 +3107,7 @@ export async function registerRoutes(
           detail: (err as any)?.detail,
           stack: (err as any)?.stack,
         });
-        res.status(500).json({ 
+        res.status(500).json({
           message: "Failed to save BOQ item",
           error: (err as any)?.message
         });
@@ -2922,12 +3129,12 @@ export async function registerRoutes(
           [versionId],
         );
 
-          try {
-            const ids = result.rows.map((r: any) => r.id).slice(0, 20);
-            console.log(`GET /api/boq-items/version/${versionId} -> ${result.rows.length} items. ids(first20):`, ids);
-          } catch (e) {
-            // ignore logging errors
-          }
+        try {
+          const ids = result.rows.map((r: any) => r.id).slice(0, 20);
+          console.log(`GET /api/boq-items/version/${versionId} -> ${result.rows.length} items. ids(first20):`, ids);
+        } catch (e) {
+          // ignore logging errors
+        }
 
         const items = result.rows.map((row: any) => ({
           id: row.id,
@@ -3105,7 +3312,7 @@ export async function registerRoutes(
               item.quantity || item.qty,
               (item.supply_rate || 0) + (item.install_rate || 0),
               (item.quantity || item.qty || 0) *
-                ((item.supply_rate || 0) + (item.install_rate || 0)),
+              ((item.supply_rate || 0) + (item.install_rate || 0)),
               item.material_id,
               item.batch_id,
               item.row_id,

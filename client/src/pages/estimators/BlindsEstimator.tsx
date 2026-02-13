@@ -16,11 +16,6 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useData, Material, Product } from "@/lib/store";
-import {
-  doorFrameLengthLegacyFeet,
-  glassAreaLegacySqft,
-  glassPerimeterLegacyFeet,
-} from "@/lib/estimators/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight,
@@ -44,6 +39,15 @@ interface MaterialWithQuantity {
   rate: number;
   shopId: string;
   shopName: string;
+  blindType?: string;
+  subOption?: string;
+  productLabel?: string;
+  batchId?: string;
+  rowId?: string;
+  installRate?: number;
+  description?: string;
+  location?: string;
+  isSaved?: boolean;
 }
 
 // ----- In-file door compute helpers and constants (kept local, not exported as default) -----
@@ -55,297 +59,86 @@ export interface RequiredMaterial {
   category: string;
 }
 
-export interface DoorComputeResult {
-  doorArea: number;
-  framePerimeter: number;
-  frameRunningFeet: number;
+export interface BlindComputeResult {
+  blindArea: number;
+  perimeter: number;
   requiredMaterials: RequiredMaterial[];
 }
 
-export const computeDoorRequired = (
-  doorType: string | null,
+const calculateQuantity = (name: string, unit: string, width: number, height: number, count: number) => {
+  const normUnit = (unit || "").toLowerCase();
+  const area = (width || 0) * (height || 0) * (count || 0);
+  if (normUnit === "sqft") return Math.ceil(area);
+  if (normUnit === "pcs" || normUnit === "set" || normUnit === "nos") return count || 1;
+  return count || 1;
+};
+
+export interface SelectedMaterialConfig {
+  materialId: string;
+  selectedShopId: string;
+  selectedBrand?: string;
+  batchId?: string;
+  rowId?: string;
+}
+
+export const computeBlindRequired = (
+  blindType: string | null,
   width: number | null,
   height: number | null,
-  frameWidth: number = 0.33,
-  hasFrame: boolean = true,
   subOption?: string | null,
-  glazingType?: string | null,
-): DoorComputeResult | null => {
-  if (!doorType || !width || !height) return null;
+): BlindComputeResult | null => {
+  if (!blindType || !width || !height) return null;
 
-  const doorArea = width * height;
-  const framePerimeter = 2 * (width + height);
-  const frameRunningFeet = hasFrame ? Math.ceil(framePerimeter) : 0;
+  const blindArea = width * height;
+  const perimeter = 2 * (width + height);
 
   const requiredMaterials: RequiredMaterial[] = [];
 
-  let hingesRequired = 3;
-  if (height > 7) hingesRequired = 4;
-  if (height > 8) hingesRequired = 5;
-
-  if (hasFrame) {
-    requiredMaterials.push({
-      type: "Door Frame - Wooden",
-      required: frameRunningFeet,
-      unit: "rft",
-      rate: 280,
-      category: "Frame",
-    });
-    requiredMaterials.push({
-      type: "Frame Screws",
-      required: Math.ceil(frameRunningFeet * 2),
-      unit: "pcs",
-      rate: 2,
-      category: "Frame",
-    });
-    requiredMaterials.push({
-      type: "Wall Plugs / Anchors",
-      required: Math.ceil(frameRunningFeet * 1.5),
-      unit: "pcs",
-      rate: 5,
-      category: "Frame",
-    });
-  }
-
-  switch (doorType) {
-    case "flush":
-    case "flush-door":
-      requiredMaterials.push({
-        type:
-          subOption === "With Vision Panel"
-            ? "Flush Door - BWR (With VP)"
-            : "Flush Door - BWR",
-        required: 1,
-        unit: "pcs",
-        rate: subOption === "With Vision Panel" ? 4500 : 3500,
-        category: "Door Panel",
-      });
-      if (subOption === "With Vision Panel") {
-        requiredMaterials.push({
-          type: "Vision Panel Glass",
-          required: 1,
-          unit: "sqft",
-          rate: 280,
-          category: "Door Panel",
-        });
-      }
-      requiredMaterials.push({
-        type: "Hinges - SS (Pair)",
-        required: hingesRequired,
-        unit: "pair",
-        rate: 180,
-        category: "Hardware",
-      });
-      break;
-
-    case "wpc":
-    case "wpc-door":
-      requiredMaterials.push({
-        type:
-          subOption === "Hollow Core"
-            ? "WPC Door - Hollow"
-            : "WPC Door - Solid",
-        required: 1,
-        unit: "pcs",
-        rate: subOption === "Hollow Core" ? 3800 : 5500,
-        category: "Door Panel",
-      });
-      requiredMaterials.push({
-        type: "Hinges - SS (Pair)",
-        required: hingesRequired,
-        unit: "pair",
-        rate: 180,
-        category: "Hardware",
-      });
-      break;
-
-    case "glassdoor":
-    case "glass-door":
-      const glassThickness = subOption === "Frameless" ? "12mm" : "10mm";
-      requiredMaterials.push({
-        type: `Glass - Toughened ${glassThickness}`,
-        required: Math.ceil(doorArea),
-        unit: "sqft",
-        rate: glassThickness === "12mm" ? 420 : 320,
-        category: "Door Panel",
-      });
-      requiredMaterials.push({
-        type: "Patch Fitting - Standard",
-        required: 1,
-        unit: "set",
-        rate: 2800,
-        category: "Hardware",
-      });
-      requiredMaterials.push({
-        type: "Floor Spring - Standard",
-        required: 1,
-        unit: "pcs",
-        rate: 3500,
-        category: "Hardware",
-      });
-      if (subOption === "Framed") {
-        requiredMaterials.push({
-          type: "Header Rail",
-          required: 1,
-          unit: "pcs",
-          rate: 1500,
-          category: "Hardware",
-        });
-        requiredMaterials.push({
-          type: "Side Rail",
-          required: 2,
-          unit: "pcs",
-          rate: 1200,
-          category: "Hardware",
-        });
-      }
-      break;
-
-    case "wooden":
-    case "wooden-door":
-      requiredMaterials.push({
-        type:
-          subOption === "Solid Wood"
-            ? "Wooden Door - Teak"
-            : "Wooden Door - Sal",
-        required: 1,
-        unit: "pcs",
-        rate: subOption === "Solid Wood" ? 18000 : 12000,
-        category: "Door Panel",
-      });
-      requiredMaterials.push({
-        type: "Hinges - Brass (Pair)",
-        required: hingesRequired,
-        unit: "pair",
-        rate: 350,
-        category: "Hardware",
-      });
-      break;
-
-    case "stile":
-    case "stile-door":
-      const glassArea = Math.ceil(doorArea * 0.6);
-      const frameArea = Math.ceil(doorArea * 0.4);
-      const isDoubleGlazing =
-        glazingType === "Double Glazing" || subOption === "Double Glazing";
-      requiredMaterials.push({
-        type: isDoubleGlazing
-          ? "Glass - Toughened 12mm (DGU)"
-          : "Glass - Toughened 10mm",
-        required: glassArea,
-        unit: "sqft",
-        rate: isDoubleGlazing ? 650 : 320,
-        category: "Door Panel",
-      });
-      requiredMaterials.push({
-        type: "Aluminium Stile Frame",
-        required: frameArea,
-        unit: "sqft",
-        rate: 280,
-        category: "Door Panel",
-      });
-      requiredMaterials.push({
-        type: "Patch Fitting - Standard",
-        required: 1,
-        unit: "set",
-        rate: 2800,
-        category: "Hardware",
-      });
-      requiredMaterials.push({
-        type: "Floor Spring - Standard",
-        required: 1,
-        unit: "pcs",
-        rate: 3500,
-        category: "Hardware",
-      });
-      break;
-  }
-
-  if (
-    doorType !== "glass-door" &&
-    doorType !== "stile-door" &&
-    doorType !== "glassdoor" &&
-    doorType !== "stile"
-  ) {
-    requiredMaterials.push({
-      type: "Mortise Lock - Standard",
-      required: 1,
-      unit: "pcs",
-      rate: 650,
-      category: "Hardware",
-    });
-    requiredMaterials.push({
-      type: "Door Handle - Standard",
-      required: 1,
-      unit: "pcs",
-      rate: 450,
-      category: "Hardware",
-    });
-  } else {
-    requiredMaterials.push({
-      type: "Glass Door Lock",
-      required: 1,
-      unit: "pcs",
-      rate: 1200,
-      category: "Hardware",
-    });
-    requiredMaterials.push({
-      type: "Glass Door Handle - Standard",
-      required: 1,
-      unit: "pair",
-      rate: 850,
-      category: "Hardware",
-    });
-  }
-
+  // Basic blind component
   requiredMaterials.push({
-    type: "Door Stopper - Floor Mount",
+    type: `${blindType.charAt(0).toUpperCase() + blindType.slice(1)} Blind Mechanism`,
     required: 1,
-    unit: "pcs",
-    rate: 120,
-    category: "Hardware",
+    unit: "set",
+    rate: 1200,
+    category: "Mechanism",
   });
 
-  if (
-    doorType !== "glass-door" &&
-    doorType !== "stile-door" &&
-    doorType !== "glassdoor" &&
-    doorType !== "stile"
-  ) {
-    requiredMaterials.push({
-      type: "Door Screws",
-      required: hingesRequired * 6,
-      unit: "pcs",
-      rate: 2,
-      category: "Hardware",
-    });
-  }
+  requiredMaterials.push({
+    type: "Blind Fabric",
+    required: Math.ceil(blindArea),
+    unit: "sqft",
+    rate: 85,
+    category: "Fabric",
+  });
 
-  return { doorArea, framePerimeter, frameRunningFeet, requiredMaterials };
+  return { blindArea, perimeter, requiredMaterials };
 };
 
-export type DoorTypeLocal =
-  | "flush-door"
-  | "wpc-door"
-  | "glass-door"
-  | "wooden-door"
-  | "stile-door";
+export type BlindTypeLocal =
+  | "roller"
+  | "zebra"
+  | "roman"
+  | "venetian"
+  | "vertical"
+  | "wooden";
 
-const STANDARD_DOOR_SIZES_LOCAL = [
-  { label: "6'6\" x 2'6\" (Standard)", width: 2.5, height: 6.5 },
-  { label: "7' x 3' (Common)", width: 3, height: 7 },
-  { label: "7' x 3'6\" (Wide)", width: 3.5, height: 7 },
-  { label: "8' x 4' (Double Door)", width: 4, height: 8 },
+const STANDARD_BLIND_SIZES_LOCAL = [
+  { label: "4' x 4' (Standard Window)", width: 4, height: 4 },
+  { label: "5' x 4' (Wide Window)", width: 5, height: 4 },
+  { label: "6' x 5' (Large Window)", width: 6, height: 5 },
   { label: "Custom Size", width: 0, height: 0 },
 ];
 
-// ----- end door helpers -----
+const BLIND_SUB_OPTIONS_LOCAL: Record<string, string[]> = {
+  roller: ["Manual - Translucent", "Manual - Blackout", "Motorized - Translucent", "Motorized - Blackout"],
+  zebra: ["Manual - Blackout", "Motorized - Blackout"],
+  roman: ["Manual - Translucent", "Manual - Blackout"],
+  venetian: ["Aluminium 25mm", "Aluminium 50mm", "Faux Wood"],
+  vertical: ["Standard Fabric", "Dim-out Fabric"],
+  wooden: ["Natural Wood 35mm", "Natural Wood 50mm", "Bamboo"],
+};
 
-interface SelectedMaterialConfig {
-  materialId: string;
-  selectedShopId: string;
-  selectedBrand?: string; // ✅ NEW
-}
+// ----- end door helpers -----
 
 // ✅ NEW: normalizers + product-based matcher
 const norm = (s?: string) =>
@@ -357,7 +150,7 @@ const norm = (s?: string) =>
 
 const normText = (s?: string) => (s || "").toString().toUpperCase();
 
-const doorKeywordsByType: Record<string, string[]> = {
+const blindKeywordsByType: Record<string, string[]> = {
   roller: ["ROLLER", "ROLLER BLIND", "ROLLER BLINDS", "CHAIN", "TUBE"],
   zebra: ["ZEBRA", "DAY NIGHT", "DAY-NIGHT", "SHEER", "D/N"],
   roman: ["ROMAN", "ROMAN BLIND", "ROMAN BLINDS", "PLEATED"],
@@ -367,31 +160,33 @@ const doorKeywordsByType: Record<string, string[]> = {
 };
 
 // Door type to product name mapping (moved here so materialMatchesDoor can reference it)
-const DOOR_TYPE_TO_PRODUCT: Record<string, string> = {
-  flush: "Flush door",
-  "flush-door": "Flush door",
-  wooden: "Wooden door",
-  "wooden-door": "Wooden door",
-  teak: "Wooden door",
-  wpc: "WPC door",
-  "wpc-door": "WPC door",
-  glassdoor: "Glass door",
-  "glass-door": "Glass door",
-  stile: "Stile door",
-  "stile-door": "Stile door",
-  glasspanel: "Glass panel",
+const BLIND_TYPE_TO_PRODUCT: Record<string, string> = {
+  roller: "Roller Blind",
+  zebra: "Zebra Blind",
+  roman: "Roman Blind",
+  venetian: "Venetian Blind",
+  vertical: "Vertical Blind",
+  wooden: "Wooden Blind",
 };
 
+const BLIND_TYPES_LOCAL = [
+  { value: "roller", label: "Roller Blinds" },
+  { value: "zebra", label: "Zebra Blinds" },
+  { value: "roman", label: "Roman Blinds" },
+  { value: "venetian", label: "Venetian Blinds" },
+  { value: "vertical", label: "Vertical Blinds" },
+  { value: "wooden", label: "Wooden Blinds" },
+];
+
 // ✅ NEW: match material by DB "product" field (primary) + fallback name/category
-const materialMatchesDoor = (m: any, doorType: string) => {
-  const prod = normText(m.product); // ✅ uses your DB field
+const materialMatchesBlind = (m: any, blindType: string) => {
+  const prod = normText(m.product);
   const name = normText(m.name);
   const cat = normText(m.category);
   const sub = normText(m.subCategory);
 
-  const kws = doorKeywordsByType[doorType] || [doorType.toUpperCase()];
+  const kws = blindKeywordsByType[blindType] || [blindType.toUpperCase()];
 
-  // Primary: Check if any keyword matches product, name, category, or subcategory
   const keywordMatch = kws.some(
     (kw) =>
       prod.includes(kw) ||
@@ -400,8 +195,7 @@ const materialMatchesDoor = (m: any, doorType: string) => {
       sub.includes(kw),
   );
 
-  // Secondary: Check against product type mapping if available
-  const expectedProduct = DOOR_TYPE_TO_PRODUCT[doorType];
+  const expectedProduct = BLIND_TYPE_TO_PRODUCT[blindType];
   const productTypeMatch =
     expectedProduct && normText(prod).includes(normText(expectedProduct));
 
@@ -428,27 +222,21 @@ export default function BlindsEstimator() {
     products: storeProducts,
   } = useData();
   const { toast } = useToast();
+  const lastBoqErrorRef = useRef<string>("");
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [step, setStep] = useState(1);
   const isCreateBOQMode =
     typeof window !== "undefined" && window.location.search.includes("step=11");
-  const [selectedDoorProductId, setSelectedDoorProductId] =
+  const [selectedBlindProductId, setSelectedBlindProductId] =
     useState<string>("");
-  const [selectedDoorProductLabel, setSelectedDoorProductLabel] =
+  const [selectedBlindProductLabel, setSelectedBlindProductLabel] =
     useState<string>("");
-  const [frameChoice, setFrameChoice] = useState<
-    "with-frame" | "without-frame" | null
-  >(null);
-  const [panelType, setPanelType] = useState<"panel" | "nopanel" | null>(null);
-  const [doorType, setDoorType] = useState<string | null>(null);
+  const [blindType, setBlindType] = useState<string | null>(null);
   const [subOption, setSubOption] = useState<string | null>(null);
-  const [visionPanel, setVisionPanel] = useState<string | null>(null);
-  const [glazingType, setGlazingType] = useState<string | null>(null);
   const [count, setCount] = useState<number | null>(1);
-  const [height, setHeight] = useState<number | null>(7);
-  const [width, setWidth] = useState<number | null>(3);
-  const [glassHeight, setGlassHeight] = useState<number | null>(6);
-  const [glassWidth, setGlassWidth] = useState<number | null>(2);
+  const [height, setHeight] = useState<number | null>(4);
+  const [width, setWidth] = useState<number | null>(4);
   const [selectedMaterials, setSelectedMaterials] = useState<
     SelectedMaterialConfig[]
   >([]);
@@ -456,457 +244,17 @@ export default function BlindsEstimator() {
   // Accumulated products for multi-product BOQ
   const [accumulatedProducts, setAccumulatedProducts] = useState<any[]>([]);
 
-  // Load accumulated products from DB on mount
-  useEffect(() => {
-    apiFetch("/api/accumulated-products/doors", {
-      headers: {},
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setAccumulatedProducts(data.data || []);
-      })
-      .catch((e) => console.error("Failed to load accumulated products", e));
-  }, []);
+  // Selection state for multi-delete on Add to BOQ page
+  const [selectedForDelete, setSelectedForDelete] = useState<string[]>([]);
 
-  // Check for initial step from URL query param
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const urlParams = new URLSearchParams(window.location.search);
-      const stepParam = urlParams.get("step");
-      if (stepParam) {
-        const stepNum = parseInt(stepParam, 10);
-        if (stepNum >= 1 && stepNum <= 12) {
-          setStep(stepNum);
-        }
-      }
-    }
-  }, []);
-
-  // Ensure accumulated products are reloaded when opening Step 12 (QA BOQ)
-  useEffect(() => {
-    if (step === 12) {
-      apiFetch("/api/accumulated-products/doors", {
-        headers: {},
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          const parsed = data.data || [];
-          setAccumulatedProducts(parsed);
-          console.debug(
-            "Restored doors_accumulated_products for Step 12:",
-            parsed.length,
-          );
-        })
-        .catch((e) =>
-          console.error("Failed to load accumulated products for Step 12", e),
-        );
-    }
-  }, [step]);
-
-  // Door label helpers that use component state
-  const getDoorLabelFrom = (opts?: {
-    doorType?: string | null;
-    panelType?: string | null;
-    subOption?: string | null;
-    visionPanel?: string | null;
-    glazingType?: string | null;
-  }) => {
-    const dt = opts?.doorType ?? doorType;
-    const pt = opts?.panelType ?? panelType;
-    const so = opts?.subOption ?? subOption;
-    if (!dt) return null;
-
-    // Prefer descriptive label from DOOR_TYPES_LOCAL if available
-    const typeEntry = DOOR_TYPES_LOCAL.find((t) => t.value === dt);
-    let productLabel = typeEntry
-      ? typeEntry.label
-      : DOOR_TYPE_TO_PRODUCT[dt] || dt;
-
-    // Normalize productLabel to include 'Door' suffix if not present
-    if (!/door/i.test(productLabel)) productLabel = `${productLabel} Door`;
-
-    const panelText = pt === "panel" ? "With Panel" : "Without Panel";
-
-    const extra = so ? ` - ${so}` : "";
-
-    return `${panelText} – ${productLabel}${extra}`;
-  };
-
-  const getSavedDoorLabel = () => {
-    const meta = savedStep9Meta;
-    if (meta && (meta.doorType || meta.panelType)) {
-      return getDoorLabelFrom({
-        doorType: meta.doorType || meta.door_type,
-        panelType: meta.panelType || meta.panel_type,
-        subOption: meta.subOption || meta.sub_option,
-      });
-    }
-
-    if (
-      currentSavedBoq &&
-      (currentSavedBoq.door_type || currentSavedBoq.doorType)
-    ) {
-      return getDoorLabelFrom({
-        doorType: currentSavedBoq.door_type || currentSavedBoq.doorType,
-        panelType: currentSavedBoq.panel_type || currentSavedBoq.panelType,
-        subOption: currentSavedBoq.sub_option || currentSavedBoq.subOption,
-      });
-    }
-
-    return getDoorLabelFrom();
-  };
-
-  const getCurrentDoorConfig = () => {
-    const selectedLabel = (selectedDoorProductLabel || "").toString();
-    if (!doorType && !selectedLabel) return null;
-    const label = selectedLabel || getDoorLabelFrom();
-    const productName =
-      selectedLabel || DOOR_TYPE_TO_PRODUCT[doorType!] || doorType!;
-    const requiresGlazing = doorType
-      ? [
-          "glassdoor",
-          "glass-door",
-          "stile",
-          "stile-door",
-          "glasspanel",
-        ].includes(doorType)
-      : normText(label).includes("GLASS") || normText(label).includes("STILE");
-    return { label, productName, requiresGlazing };
-  };
-
-  // Get available door types based on available products
-  const getAvailableDoorTypes = () => {
-    if (!storeMaterials.length) return [];
-    const availableDoorTypes: Array<{ value: string; label: string }> = [
-      { value: "roller", label: "Roller Blinds" },
-      { value: "zebra", label: "Zebra Blinds" },
-      { value: "roman", label: "Roman Blinds" },
-      { value: "venetian", label: "Venetian Blinds" },
-      { value: "vertical", label: "Vertical Blinds" },
-      { value: "wooden", label: "Wooden Blinds" },
-    ];
-
-    return availableDoorTypes;
-  };
-
-  // ✅ UPDATED: Get materials for selected door type driven by DB `product` field
-  const getAvailableMaterials = () => {
-    const selectedLabel = (selectedDoorProductLabel || "").toString();
-    if ((!doorType && !selectedLabel) || !storeMaterials.length) return [];
-
-    // Preferred Step: try strict product-based matching using DOOR_TYPE_TO_PRODUCT or selected product
-    const expectedProduct =
-      selectedLabel || (doorType ? DOOR_TYPE_TO_PRODUCT[doorType] : "");
-    let doorMatched: typeof storeMaterials = [];
-
-    if (expectedProduct) {
-      doorMatched = storeMaterials.filter((m) => {
-        const prod = (m.product || "").toString();
-        if (!prod || !expectedProduct) return false;
-        const p = normText(prod);
-        const e = normText(expectedProduct);
-        return p.includes(e) || e.includes(p);
-      });
-    }
-
-    // Fallback: if strict product match yields nothing and user selected label explicitly,
-    // don't use materialMatchesDoor fallback (too loose). Only use it if doorType was inferred.
-    if ((!doorMatched || doorMatched.length === 0) && !selectedLabel) {
-      doorMatched = doorType
-        ? storeMaterials.filter((m) => materialMatchesDoor(m, doorType))
-        : storeMaterials.filter((m) => {
-            const prod = (m.product || "").toString();
-            if (!expectedProduct) return false;
-            const p = normText(prod);
-            const e = normText(expectedProduct);
-            return p.includes(e) || e.includes(p);
-          });
-    }
-
-    if (doorMatched.length === 0) return [];
-
-    // Step 2: Deduplicate by "product+name+code" (keep cheapest for default listing)
-    const uniqueMap = new Map<string, (typeof doorMatched)[0]>();
-
-    for (const mat of doorMatched) {
-      const key = `${normText(mat.product)}__${normText(mat.name)}__${norm(mat.code)}`;
-      const existing = uniqueMap.get(key);
-      if (!existing || (mat.rate || 0) < (existing.rate || 0))
-        uniqueMap.set(key, mat);
-    }
-
-    return Array.from(uniqueMap.values());
-  };
-
-  // (moved into component to access state)
-
-  const DOOR_SUB_OPTIONS_LOCAL: Record<string, string[]> = {
-    flush: ["With Vision Panel", "Without Vision Panel"],
-    teak: ["Solid Wood", "Engineered Wood"],
-    wpc: ["Solid Core", "Hollow Core"],
-    glassdoor: ["Frameless", "Framed"],
-    glasspanel: ["Frameless", "Framed"],
-    stile: ["Single Glazing", "Double Glazing"],
-  };
-
-  const VISION_PANEL_OPTIONS_LOCAL = ["Single Glass", "Double Glass"];
-
-  const DOOR_TYPES_LOCAL = [
-    { value: "flush", label: "Flush Doors" },
-    { value: "wpc", label: "WPC Doors" },
-    { value: "glassdoor", label: "Glass Door" },
-    { value: "teak", label: "Wooden Door" },
-    { value: "stile", label: "Stile Door" },
-  ];
-
-  // Calculate quantities based on dimensions and door type
-  const calculateQuantity = (
-    materialName: string,
-    materialUnit: string,
-  ): number => {
-    const c = count || 1;
-    const h = height || 7;
-    const w = width || 3;
-    const gh = glassHeight || 6;
-    const gw = glassWidth || 2;
-
-    // Frame length using legacy estimator formula
-    const frameLength = doorFrameLengthLegacyFeet(h, w);
-
-    // Convert material name to lowercase for matching
-    const name = materialName.toLowerCase();
-
-    let quantity = 0;
-
-    // Frame materials
-    if (name.includes("frame") || name.includes("door frame")) {
-      quantity = frameLength * c;
-    }
-    // Door panels/shutters
-    else if (
-      name.includes("door") &&
-      (name.includes("panel") ||
-        name.includes("shutter") ||
-        name.includes("flush") ||
-        name.includes("wooden"))
-    ) {
-      quantity = c;
-    }
-    // Hinges
-    else if (name.includes("hinge")) {
-      quantity = c * 3; // 3 hinges per door
-    }
-    // Hardware (locks, handles, etc.)
-    else if (
-      name.includes("lock") ||
-      name.includes("handle") ||
-      name.includes("stopper") ||
-      name.includes("bolt")
-    ) {
-      quantity = c;
-    }
-    // Glass materials
-    else if (name.includes("glass")) {
-      const glassArea = glassAreaLegacySqft(gh, gw);
-      quantity = glassArea * c;
-    }
-    // Default to 1 per door for other materials
-    else {
-      quantity = c;
-    }
-
-    return Math.max(1, Math.ceil(quantity));
-  };
-
-  // Get materials with quantities and shop info
-  const getMaterialsWithDetails = (
-    selectionsParam?: SelectedMaterialConfig[],
-    editableOverride?: Record<
-      string,
-      { quantity: number; supplyRate: number; installRate: number }
-    >,
-  ): MaterialWithQuantity[] => {
-    const selections = selectionsParam || selectedMaterials;
-    const overrideBag = editableOverride || editableMaterials;
-    // Use availableMaterials which includes both code-matched and fallback materials
-    return selections
-      .map((selection) => {
-        let base = availableMaterials.find(
-          (m) => m.id === selection.materialId,
-        );
-        // If the user switched door type, the material may no longer be in availableMaterials.
-        // Fall back to finding the material directly in the store by id so cart items persist.
-        if (!base)
-          base =
-            storeMaterials.find((m) => m.id === selection.materialId) || null;
-        if (!base) return null;
-
-        // ✅ NEW: find exact DB row matching product+name+brand+shop
-        const chosen =
-          storeMaterials.find((m) => {
-            const sameProd = normText(m.product) === normText(base.product);
-            const sameName = normText(m.name) === normText(base.name);
-            const sameShop = m.shopId === selection.selectedShopId;
-            const sameBrand =
-              getBrandOfMaterial(m) === (selection.selectedBrand || "Generic");
-            return sameProd && sameName && sameShop && sameBrand;
-          }) || base;
-
-        const shop = storeShops.find((s) => s.id === selection.selectedShopId);
-
-        // Build a unique row key for this selection (batch-aware)
-        const rowId =
-          (selection as any).rowId ||
-          (selection.batchId ? `${selection.batchId}-${chosen.id}` : chosen.id);
-
-        // allow editable overrides (use provided override bag if present)
-        const override =
-          overrideBag[rowId] || overrideBag[chosen.id] || overrideBag[base.id];
-        const computedQty = calculateQuantity(chosen.name, chosen.unit);
-        const quantity = override?.quantity ?? computedQty;
-        const supplyRate = override?.supplyRate ?? chosen.rate ?? 0;
-        const installRate = override?.installRate ?? 0;
-
-        // Try to find saved batch metadata (doorType, panelType, descriptions) from savedStep9Materials
-        const savedRow = (savedStep9Materials || []).find(
-          (s: any) =>
-            s.rowId === rowId || `${s.batchId || ""}-${s.id}` === rowId,
-        );
-
-        return {
-          id: chosen.id,
-          batchId: selection.batchId,
-          rowId,
-          name: chosen.name,
-          quantity,
-          unit: chosen.unit,
-          rate: supplyRate,
-          shopId: selection.selectedShopId,
-          shopName: shop?.name || "Unknown",
-          // include installRate for downstream save/finalize
-          installRate,
-          // batch metadata
-          doorType: savedRow?.doorType || savedRow?.door_type || undefined,
-          panelType: savedRow?.panelType || savedRow?.panel_type || undefined,
-          subOption: savedRow?.subOption || savedRow?.sub_option || undefined,
-          glazingType:
-            savedRow?.glazingType || savedRow?.glazing_type || undefined,
-          productLabel: savedRow?.productLabel || undefined,
-        } as any;
-      })
-      .filter((m): m is MaterialWithQuantity => m !== null);
-  };
-
-  const calculateTotalCost = (): number => {
-    return getMaterialsWithDetails().reduce(
-      (sum, m) => sum + m.quantity * m.rate,
-      0,
-    );
-  };
-
-  // materials available for current door (used in Step 6 render)
-  const availableMaterials = getAvailableMaterials();
-
-  const getProductLabel = (p: any) =>
-    (
-      p?.name ||
-      p?.title ||
-      p?.label ||
-      p?.productName ||
-      p?.product ||
-      ""
-    ).toString();
-  const getProductCategory = (p: any) =>
-    (p?.category || p?.type || p?.group || p?.section || "").toString();
-  const isBlindsProduct = (p: any) => {
-    const label = normText(getProductLabel(p));
-    const cat = normText(getProductCategory(p));
-    const sub = normText(
-      (p as any)?.subCategory?.name || (p as any)?.subCategory || "",
-    );
-
-    // Positive match: blinds keywords
-    const isBlinds =
-      label.includes("BLIND") ||
-      label.includes("BLINDS") ||
-      label.includes("ROLLER") ||
-      label.includes("ZEBRA") ||
-      label.includes("ROMAN") ||
-      label.includes("VENETIAN") ||
-      label.includes("VERTICAL") ||
-      cat.includes("BLIND") ||
-      cat.includes("BLINDS") ||
-      sub.includes("BLIND") ||
-      sub.includes("BLINDS");
-
-    // Negative filter: exclude other estimators' products
-    const isNotBlinds =
-      label.includes("DOOR") ||
-      label.includes("PIPE") ||
-      label.includes("PLUMB") ||
-      label.includes("ELECTRICAL") ||
-      label.includes("SWITCH") ||
-      label.includes("SOCKET") ||
-      label.includes("CEILING") ||
-      label.includes("GYPSUM") ||
-      label.includes("FLOORING") ||
-      label.includes("PAINT") ||
-      label.includes("CIVIL") ||
-      label.includes("WALL") ||
-      cat.includes("DOOR") ||
-      cat.includes("PIPE") ||
-      cat.includes("PLUMB") ||
-      cat.includes("ELECTRICAL") ||
-      cat.includes("CEILING") ||
-      cat.includes("FLOORING") ||
-      cat.includes("PAINT") ||
-      cat.includes("CIVIL") ||
-      sub.includes("DOOR") ||
-      sub.includes("PIPE") ||
-      sub.includes("PLUMB") ||
-      sub.includes("ELECTRICAL") ||
-      sub.includes("CEILING") ||
-      sub.includes("FLOORING") ||
-      sub.includes("PAINT");
-
-    return isBlinds && !isNotBlinds;
-  };
-
-  const inferBlindTypeFromProductLabel = (label: string): string | null => {
-    const s = normText(label);
-    if (s.includes("ROLLER")) return "roller";
-    if (s.includes("ZEBRA") || s.includes("DAY") || s.includes("NIGHT"))
-      return "zebra";
-    if (s.includes("ROMAN")) return "roman";
-    if (s.includes("VENETIAN")) return "venetian";
-    if (s.includes("VERTICAL")) return "vertical";
-    if (s.includes("WOOD") || s.includes("BAMBOO")) return "wooden";
-    return null;
-  };
-  const blindsProducts = (storeProducts || [])
-    .filter(isBlindsProduct)
-    .slice()
-    .sort((a: any, b: any) => {
-      const la = getProductLabel(a);
-      const lb = getProductLabel(b);
-      return la.localeCompare(lb);
-    });
-  const handleSelectDoorProduct = (p: Product) => {
-    const label = getProductLabel(p);
-    setSelectedDoorProductId((p as any).id || label);
-    setSelectedDoorProductLabel(label);
-    const inferred = inferBlindTypeFromProductLabel(label);
-    if (inferred) setDoorType(inferred);
-    else setDoorType(doorType); // keep existing if already set
-    setSubOption(null);
-    setVisionPanel(null);
-    setGlazingType(null);
-    setSelectedMaterials([]);
-    setEditableMaterials({});
-    setMaterialDescriptions({});
-    setMaterialLocations({});
-    setStep(6);
-  };
+  // Saved BOQs across estimators
+  const [savedBoqs, setSavedBoqs] = useState<any[]>([]);
+  const [currentSavedBoq, setCurrentSavedBoq] = useState<any | null>(null);
+  // Materials specifically saved from Step 9 (cart). Only these should appear in Step 11.
+  const [savedStep9Materials, setSavedStep9Materials] = useState<any[] | null>(
+    null,
+  );
+  const [savedStep9Meta, setSavedStep9Meta] = useState<any | null>(null);
 
   // Editable materials for Step 7 (allow user to tweak qty/supplyRate/installRate before BOQ)
   const [editableMaterials, setEditableMaterials] = useState<
@@ -975,6 +323,388 @@ export default function BlindsEstimator() {
   const [dbStep12Items, setDbStep12Items] = useState<any[]>([]);
   const [savingStep11, setSavingStep11] = useState<boolean>(false);
 
+  // Load accumulated products from DB on mount
+  useEffect(() => {
+    apiFetch("/api/accumulated-products/blinds", {
+      headers: {},
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setAccumulatedProducts(data.data || []);
+      })
+      .catch((e) => console.error("Failed to load accumulated products", e));
+  }, []);
+
+  // Check for initial step from URL query param
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const stepParam = urlParams.get("step");
+      if (stepParam) {
+        const stepNum = parseInt(stepParam, 10);
+        if (stepNum >= 1 && stepNum <= 12) {
+          setStep(stepNum);
+        }
+      }
+    }
+  }, []);
+
+  // Ensure accumulated products are reloaded when opening Step 12 (QA BOQ)
+  useEffect(() => {
+    if (step === 12) {
+      apiFetch("/api/accumulated-products/blinds", {
+        headers: {},
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          const parsed = data.data || [];
+          setAccumulatedProducts(parsed);
+          console.debug(
+            "Restored blinds_accumulated_products for Step 12:",
+            parsed.length,
+          );
+        })
+        .catch((e) =>
+          console.error("Failed to load accumulated products for Step 12", e),
+        );
+    }
+  }, [step]);
+
+  // Door label helpers that use component state
+  const getBlindLabelFrom = (opts?: {
+    blindType?: string | null;
+    subOption?: string | null;
+  }) => {
+    const bt = opts?.blindType ?? blindType;
+    const so = opts?.subOption ?? subOption;
+    if (!bt) return null;
+
+    const typeEntry = BLIND_TYPES_LOCAL.find((t) => t.value === bt);
+    let productLabel = typeEntry
+      ? typeEntry.label
+      : BLIND_TYPE_TO_PRODUCT[bt] || bt;
+
+    // Normalize productLabel to include 'Blind' suffix if not present
+    if (!/blind/i.test(productLabel)) productLabel = `${productLabel} Blind`;
+
+    const extra = so ? ` - ${so}` : "";
+
+    return `${productLabel}${extra}`;
+  };
+
+  const getSavedBlindLabel = () => {
+    const meta = savedStep9Meta;
+    if (meta && (meta.blindType || meta.blind_type)) {
+      return getBlindLabelFrom({
+        blindType: meta.blindType || meta.blind_type,
+        subOption: meta.subOption || meta.sub_option,
+      });
+    }
+
+    if (
+      currentSavedBoq &&
+      (currentSavedBoq.blind_type || currentSavedBoq.blindType)
+    ) {
+      return getBlindLabelFrom({
+        blindType: currentSavedBoq.blind_type || currentSavedBoq.blindType,
+        subOption: currentSavedBoq.sub_option || currentSavedBoq.subOption,
+      });
+    }
+
+    return getBlindLabelFrom();
+  };
+
+  const getCurrentBlindConfig = () => {
+    const selectedLabel = (selectedBlindProductLabel || "").toString();
+    if (!blindType && !selectedLabel) return null;
+    const label = selectedLabel || getBlindLabelFrom();
+    const productName =
+      selectedLabel || BLIND_TYPE_TO_PRODUCT[blindType!] || blindType!;
+    return { label, productName };
+  };
+
+  // Get available blind types based on available products
+  const getAvailableBlindTypes = () => {
+    return BLIND_TYPES_LOCAL;
+  };
+
+  // ✅ UPDATED: Get materials for selected blind type driven by DB `product` field
+  const getAvailableMaterials = () => {
+    const selectedLabel = (selectedBlindProductLabel || "").toString();
+    if ((!blindType && !selectedLabel) || !storeMaterials.length) return [];
+
+    // Preferred Step: try strict product-based matching using BLIND_TYPE_TO_PRODUCT or selected product
+    const expectedProduct =
+      selectedLabel || (blindType ? BLIND_TYPE_TO_PRODUCT[blindType] : "");
+    let blindMatched: typeof storeMaterials = [];
+
+    if (expectedProduct) {
+      blindMatched = storeMaterials.filter((m) => {
+        const prod = (m.product || "").toString();
+        if (!prod || !expectedProduct) return false;
+        const p = normText(prod);
+        const e = normText(expectedProduct);
+        return p.includes(e) || e.includes(p);
+      });
+    }
+
+    // Fallback: if strict product match yields nothing and user selected label explicitly,
+    // don't use materialMatchesBlind fallback (too loose). Only use it if blindType was inferred.
+    if ((!blindMatched || blindMatched.length === 0) && !selectedLabel) {
+      blindMatched = blindType
+        ? storeMaterials.filter((m) => materialMatchesBlind(m, blindType))
+        : storeMaterials.filter((m) => {
+          const prod = (m.product || "").toString();
+          if (!expectedProduct) return false;
+          const p = normText(prod);
+          const e = normText(expectedProduct);
+          return p.includes(e) || e.includes(p);
+        });
+    }
+
+    if (blindMatched.length === 0) return [];
+
+    // Step 2: Deduplicate by "product+name+code" (keep cheapest for default listing)
+    const uniqueMap = new Map<string, (typeof blindMatched)[0]>();
+
+    for (const mat of blindMatched) {
+      const key = `${normText(mat.product)}__${normText(mat.name)}__${norm(mat.code)}`;
+      const existing = uniqueMap.get(key);
+      if (!existing || (mat.rate || 0) < (existing.rate || 0))
+        uniqueMap.set(key, mat);
+    }
+
+    return Array.from(uniqueMap.values());
+  };
+
+  // Get materials with quantities and shop info
+  const getMaterialsWithDetails = (
+    selectionsParam?: SelectedMaterialConfig[],
+    editableOverride?: Record<
+      string,
+      { quantity: number; supplyRate: number; installRate: number }
+    >,
+  ): MaterialWithQuantity[] => {
+    const selections = selectionsParam || selectedMaterials;
+    const overrideBag = editableOverride || editableMaterials;
+    // Use availableMaterials which includes both code-matched and fallback materials
+    return selections
+      .map((selection) => {
+        let base = availableMaterials.find(
+          (m) => m.id === selection.materialId,
+        );
+        // If the user switched blind type, the material may no longer be in availableMaterials.
+        // Fall back to finding the material directly in the store by id so cart items persist.
+        if (!base)
+          base =
+            storeMaterials.find((m) => m.id === selection.materialId);
+        if (!base) return null;
+
+        // ✅ NEW: find exact DB row matching product+name+brand+shop
+        const chosen =
+          storeMaterials.find((m) => {
+            const sameProd = normText(m.product) === normText(base.product);
+            const sameName = normText(m.name) === normText(base.name);
+            const sameShop = m.shopId === selection.selectedShopId;
+            const sameBrand =
+              getBrandOfMaterial(m) === (selection.selectedBrand || "Generic");
+            return sameProd && sameName && sameShop && sameBrand;
+          }) || base;
+
+        const shop = storeShops.find((s) => s.id === selection.selectedShopId);
+
+        // Build a unique row key for this selection (batch-aware)
+        const rowId =
+          (selection as any).rowId ||
+          (selection.batchId ? `${selection.batchId}-${chosen.id}` : chosen.id);
+
+        // allow editable overrides (use provided override bag if present)
+        const override =
+          overrideBag[rowId] || overrideBag[chosen.id] || overrideBag[base.id];
+        const computedQty = calculateQuantity(chosen.name, chosen.unit, width || 4, height || 4, count || 1);
+        const quantity = override?.quantity ?? computedQty;
+        const supplyRate = override?.supplyRate ?? chosen.rate ?? 0;
+        const installRate = override?.installRate ?? 0;
+
+        // Try to find saved batch metadata (blindType, descriptions) from savedStep9Materials
+        const savedRow = (savedStep9Materials || []).find(
+          (s: any) =>
+            s.rowId === rowId || `${s.batchId || ""}-${s.id}` === rowId,
+        );
+
+        return {
+          id: chosen.id,
+          batchId: selection.batchId,
+          rowId,
+          name: chosen.name,
+          quantity,
+          unit: chosen.unit,
+          rate: supplyRate,
+          shopId: selection.selectedShopId,
+          shopName: shop?.name || "Unknown",
+          // include installRate for downstream save/finalize
+          installRate,
+          // batch metadata
+          blindType: savedRow?.blindType || savedRow?.blind_type || undefined,
+          subOption: savedRow?.subOption || savedRow?.sub_option || undefined,
+          productLabel: savedRow?.productLabel || undefined,
+        } as MaterialWithQuantity;
+      })
+      .filter((m): m is MaterialWithQuantity => m !== null);
+  };
+
+  const calculateTotalCost = (): number => {
+    return getMaterialsWithDetails().reduce(
+      (sum, m) => sum + m.quantity * (m.rate + (m.installRate || 0)),
+      0,
+    );
+  };
+
+  const handleDeleteSelected = (id: string, batchId?: string) => {
+    setSelectedMaterials((prev) =>
+      prev.filter((m) =>
+        batchId
+          ? !(m.materialId === id && m.batchId === batchId)
+          : m.materialId !== id,
+      ),
+    );
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedMaterials(
+        availableMaterials.map((m) => ({
+          materialId: m.id,
+          selectedShopId: m.shopId!,
+          selectedBrand: getBrandOfMaterial(m) || "Generic",
+        })) as SelectedMaterialConfig[],
+      );
+    } else {
+      setSelectedMaterials([]);
+    }
+  };
+
+  // materials available for current door (used in Step 6 render)
+  const availableMaterials = getAvailableMaterials();
+
+  const getProductLabel = (p: any) =>
+    (
+      p?.name ||
+      p?.title ||
+      p?.label ||
+      p?.productName ||
+      p?.product ||
+      ""
+    ).toString();
+  const getProductCategory = (p: any) =>
+    (p?.category_name || p?.category || p?.type || p?.group || p?.section || "").toString();
+  const isBlindsProduct = (p: any) => {
+    const label = normText(getProductLabel(p));
+    const cat = normText(getProductCategory(p));
+    // Support both snake_case from DB and camelCase from potential previous versions
+    const sub = normText(
+      (p as any)?.subcategory_name || (p as any)?.subCategory?.name || (p as any)?.subcategory || (p as any)?.subCategory || "",
+    );
+
+    // Positive match: blinds keywords
+    const isBlinds =
+      label.includes("BLIND") ||
+      label.includes("BLINDS") ||
+      label.includes("ROLLER") ||
+      label.includes("ZEBRA") ||
+      label.includes("ROMAN") ||
+      label.includes("VENETIAN") ||
+      label.includes("VERTICAL") ||
+      label.includes("CHICK") ||
+      cat.includes("BLIND") ||
+      cat.includes("BLINDS") ||
+      sub.includes("BLIND") ||
+      sub.includes("BLINDS");
+
+    // If it explicitly says "BLIND", we should be very careful about excluding it
+    const hasExplicitBlindKeyword =
+      label.includes("BLIND") ||
+      label.includes("BLINDS") ||
+      cat.includes("BLIND") ||
+      cat.includes("BLINDS") ||
+      sub.includes("BLIND") ||
+      sub.includes("BLINDS");
+
+    // Negative filter: exclude other estimators' products ONLY if they don't have an explicit blind keyword
+    const isNotBlinds = !hasExplicitBlindKeyword && (
+      label.includes("DOOR") ||
+      label.includes("PIPE") ||
+      label.includes("PLUMB") ||
+      label.includes("ELECTRICAL") ||
+      label.includes("SWITCH") ||
+      label.includes("SOCKET") ||
+      label.includes("CEILING") ||
+      label.includes("GYPSUM") ||
+      label.includes("FLOORING") ||
+      label.includes("PAINT") ||
+      label.includes("CIVIL") ||
+      label.includes("WALL") ||
+      cat.includes("DOOR") ||
+      cat.includes("PIPE") ||
+      cat.includes("PLUMB") ||
+      cat.includes("ELECTRICAL") ||
+      cat.includes("CEILING") ||
+      cat.includes("FLOORING") ||
+      cat.includes("PAINT") ||
+      cat.includes("CIVIL") ||
+      sub.includes("DOOR") ||
+      sub.includes("PIPE") ||
+      sub.includes("PLUMB") ||
+      sub.includes("ELECTRICAL") ||
+      sub.includes("CEILING") ||
+      sub.includes("FLOORING") ||
+      sub.includes("PAINT")
+    );
+
+    return isBlinds && !isNotBlinds;
+  };
+
+  const inferBlindTypeFromProductLabel = (label: string): string | null => {
+    const s = normText(label);
+    if (s.includes("ROLLER")) return "roller";
+    if (s.includes("ZEBRA") || s.includes("DAY") || s.includes("NIGHT"))
+      return "zebra";
+    if (s.includes("ROMAN")) return "roman";
+    if (s.includes("VENETIAN")) return "venetian";
+    if (s.includes("VERTICAL")) return "vertical";
+    if (s.includes("WOOD") || s.includes("BAMBOO")) return "wooden";
+    return null;
+  };
+  const blindsProducts = (storeProducts || [])
+    .filter(isBlindsProduct)
+    .slice()
+    .sort((a: any, b: any) => {
+      const la = getProductLabel(a);
+      const lb = getProductLabel(b);
+      return la.localeCompare(lb);
+    });
+  const handleSelectBlindProduct = (p: Product) => {
+    const label = getProductLabel(p);
+    setSelectedBlindProductId((p as any).id || label);
+    setSelectedBlindProductLabel(label);
+    const inferred = inferBlindTypeFromProductLabel(label);
+    if (inferred) setBlindType(inferred);
+    else setBlindType(blindType); // keep existing if already set
+    setSubOption(null);
+    setSelectedMaterials([]);
+    setEditableMaterials({});
+    setMaterialDescriptions({});
+    setMaterialLocations({});
+    setStep(6);
+  };
+
+
+  // Fetch saved BOQs when opening Add to BOQ step
+  useEffect(() => {
+    if (step === 9) {
+      fetchSavedBoqs();
+    }
+  }, [step]);
   // Load data from DB on mount and when finalBillNo changes
   useEffect(() => {
     const loadDbData = async () => {
@@ -984,21 +714,51 @@ export default function BlindsEstimator() {
         // Load Step 9 data
         const step9Response = await apiFetch(
           `/api/estimator-step9-items?session_id=${finalBillNo}&estimator=blinds`,
-          {
-            headers: {},
-          },
+          { headers: {} },
         );
         if (step9Response.ok) {
           const step9Data = await step9Response.json();
-          setDbStep9Items(step9Data.items || []);
+          const items = step9Data.items || [];
+          setDbStep9Items(items);
+
+          if (items.length > 0) {
+            const first = items[0];
+            setSavedStep9Materials(items.map((item: any) => ({
+              id: item.material_id,
+              rowId: item.row_id,
+              batchId: item.batch_id,
+              name: item.name,
+              unit: item.unit,
+              quantity: item.quantity,
+              supplyRate: item.supply_rate,
+              installRate: item.install_rate,
+              shopId: item.shop_id,
+              shopName: item.shop_name,
+              description: item.description,
+              location: item.location,
+              blindType: item.blind_type || item.door_type,
+              subOption: item.sub_option,
+            })));
+
+            setSavedStep9Meta({
+              blindType: first.blind_type || first.door_type,
+              subOption: first.sub_option,
+              count: first.qty,
+              height: first.height,
+              width: first.width,
+              subtotal: first.subtotal,
+              sgst: first.sgst,
+              cgst: first.cgst,
+              round_off: first.round_off,
+              grand_total: first.grand_total,
+            });
+          }
         }
 
         // Load Step 11 data
         const step11Response = await apiFetch(
           `/api/estimator-step11-groups?session_id=${finalBillNo}&estimator=blinds`,
-          {
-            headers: {},
-          },
+          { headers: {} },
         );
         if (step11Response.ok) {
           const step11Data = await step11Response.json();
@@ -1008,9 +768,7 @@ export default function BlindsEstimator() {
         // Load Step 12 data
         const step12Response = await apiFetch(
           `/api/estimator-step12-qa-selection?session_id=${finalBillNo}&estimator=blinds`,
-          {
-            headers: {},
-          },
+          { headers: {} },
         );
         if (step12Response.ok) {
           const step12Data = await step12Response.json();
@@ -1024,344 +782,10 @@ export default function BlindsEstimator() {
     loadDbData();
   }, [finalBillNo]);
 
-  useEffect(() => {
-    if (step === 7) {
-      const details = getMaterialsWithDetails();
-      const map: Record<
-        string,
-        { quantity: number; supplyRate: number; installRate: number }
-      > = {};
-      details.forEach((d) => {
-        map[d.id] = {
-          quantity: d.quantity || 0,
-          supplyRate: d.rate || 0,
-          installRate: 0,
-        };
-      });
-      setEditableMaterials(map);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, selectedMaterials]);
-
-  // Prefill final shop/company details when opening final BOQ step
-  useEffect(() => {
-    if (step === 9) {
-      const details = getMaterialsWithDetails(
-        cartSelections,
-        cartEditableMaterials,
-      );
-      if (details.length > 0) {
-        const firstShopId = details[0].shopId;
-        const shop = storeShops.find((s) => s.id === firstShopId);
-        if (shop) {
-          const parts = [
-            shop.name || "",
-            shop.address || "",
-            shop.area || "",
-            shop.city || "",
-            shop.state || "",
-            shop.pincode || "",
-            shop.gstNo ? `GSTIN: ${shop.gstNo}` : "",
-            shop.phone || "",
-          ].filter(Boolean);
-          setFinalShopDetails(parts.join("\n"));
-        }
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    step,
-    cartSelections,
-    cartEditableMaterials,
-    selectedMaterials,
-    storeShops,
-  ]);
-
-  // Fetch saved BOQs when opening Add to BOQ step
-  useEffect(() => {
-    if (step === 9) {
-      fetchSavedBoqs();
-      // When entering Step 9, combine saved cart data with current selections
-      const combinedSelections: SelectedMaterialConfig[] = [];
-      const combinedEditMap: Record<
-        string,
-        { quantity: number; supplyRate: number; installRate: number }
-      > = {};
-      const combinedDescMap: Record<string, string> = {};
-      const combinedLocMap: Record<string, string> = {};
-
-      // First, load from saved Step-9 cart (database-saved materials)
-      // Start with in-memory cart (previously added items in this session, including unsaved)
-      if (savedStep9Materials && savedStep9Materials.length > 0) {
-        for (const m of savedStep9Materials as any[]) {
-          const rowKey =
-            (m as any).rowId || `${(m as any).batchId || ""}-${(m as any).id}`;
-          const exists = combinedSelections.findIndex(
-            (s) =>
-              s.materialId === (m as any).id &&
-              (s as any).rowId === rowKey &&
-              (s.batchId || "") === ((m as any).batchId || ""),
-          );
-          if (exists !== -1) continue;
-          combinedSelections.push({
-            materialId: (m as any).id,
-            selectedShopId: (m as any).shopId || "",
-            selectedBrand: (m as any).brand || undefined,
-            batchId: (m as any).batchId,
-            rowId: rowKey,
-          } as any);
-          combinedEditMap[rowKey] = {
-            quantity: Number((m as any).quantity || 0),
-            supplyRate: Number((m as any).supplyRate ?? (m as any).rate ?? 0),
-            installRate: Number((m as any).installRate || 0),
-          };
-          if ((m as any).description)
-            combinedDescMap[rowKey] = (m as any).description;
-          if ((m as any).location) combinedLocMap[rowKey] = (m as any).location;
-        }
-      }
-
-      if (dbStep9Items && dbStep9Items.length > 0) {
-        for (const item of dbStep9Items) {
-          // Find the material in storeMaterials
-          const match = storeMaterials.find((sm) => sm.id === item.material_id);
-          if (!match) continue;
-
-          const materialId = item.material_id;
-          const rowKey =
-            item.row_id ||
-            (item.batch_id ? `${item.batch_id}-${materialId}` : materialId);
-          const shopId = item.shop_id || "";
-          const brand = item.brand || undefined;
-
-          const existingIndex = combinedSelections.findIndex(
-            (s: any) =>
-              s.materialId === materialId &&
-              (s.batchId || "") === ((item.batch_id as any) || "") &&
-              ((s as any).rowId || "") === rowKey,
-          );
-          if (existingIndex !== -1) continue;
-
-          combinedSelections.push({
-            materialId,
-            selectedShopId: shopId,
-            selectedBrand: brand,
-            batchId:
-              item.batch_id ||
-              (item.row_id ? rowKey.replace(`-${materialId}`, "") : undefined),
-          });
-
-          combinedEditMap[rowKey] = {
-            quantity: Number(item.quantity || 0),
-            supplyRate: Number(item.supply_rate || item.rate || 0),
-            installRate: Number(item.install_rate || 0),
-          };
-          if (item.description) combinedDescMap[rowKey] = item.description;
-          if (item.location) combinedLocMap[rowKey] = item.location;
-        }
-      }
-
-      // DB only: no browser storage fallback.
-      // Then, add current selections from previous steps (new materials)
-      if (selectedMaterials && selectedMaterials.length > 0) {
-        selectedMaterials.forEach((selection) => {
-          // Check if this material is already in the combined selections
-          const existingIndex = combinedSelections.findIndex(
-            (s) =>
-              s.materialId === selection.materialId &&
-              s.batchId === selection.batchId,
-          );
-          if (existingIndex === -1) {
-            // Add new material
-            combinedSelections.push(selection);
-
-            const material = storeMaterials.find(
-              (m) => m.id === selection.materialId,
-            );
-            if (material) {
-              const rowKey = selection.batchId
-                ? `${selection.batchId}-${selection.materialId}`
-                : selection.materialId;
-              combinedEditMap[rowKey] = {
-                quantity:
-                  editableMaterials[selection.materialId]?.quantity ??
-                  material.quantity ??
-                  1,
-                supplyRate:
-                  editableMaterials[selection.materialId]?.supplyRate ??
-                  material.rate ??
-                  0,
-                installRate:
-                  editableMaterials[selection.materialId]?.installRate ?? 0,
-              };
-            }
-          }
-        });
-      }
-
-      // Update the cart with combined data
-      if (combinedSelections.length > 0) setCartSelections(combinedSelections);
-      if (Object.keys(combinedEditMap).length > 0)
-        setCartEditableMaterials(combinedEditMap);
-      if (Object.keys(combinedDescMap).length > 0)
-        setMaterialDescriptions((prev) => ({ ...prev, ...combinedDescMap }));
-      if (Object.keys(combinedLocMap).length > 0)
-        setMaterialLocations((prev) => ({ ...prev, ...combinedLocMap }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, selectedMaterials, dbStep9Items]);
-
-  // Load saved Step 11 data when entering Step 11
-  useEffect(() => {
-    if (step === 11) {
-      // Load saved step 11 data and combine with current cart data
-      const loadStep11Data = async () => {
-        if (!finalBillNo) return;
-
-        try {
-          const response = await apiFetch(
-            `/api/estimator-step11-groups?session_id=${finalBillNo}&estimator=blinds`,
-            {
-              headers: {},
-            },
-          );
-
-          if (response.ok) {
-            const data = await response.json();
-            const savedItems = data.items || [];
-
-            // Update step 11 rates from saved data
-            const newSupplyRates: Record<string, number> = {};
-            const newInstallRates: Record<string, number> = {};
-            const newQtys: Record<string, number> = {};
-            const newUnits: Record<string, string> = {};
-
-            savedItems.forEach((item: any) => {
-              // Find matching material by name (since we don't have IDs in saved data)
-              const material = storeMaterials.find((m) => m.name === item.item);
-              if (material) {
-                newSupplyRates[material.id] = Number(item.supply_rate || 0);
-                newInstallRates[material.id] = Number(item.install_rate || 0);
-                newQtys[material.id] = Number(item.qty || 0);
-                newUnits[material.id] = item.unit || "";
-              }
-            });
-
-            setStep11SupplyRates((prev) => ({ ...prev, ...newSupplyRates }));
-            setStep11InstallRates((prev) => ({ ...prev, ...newInstallRates }));
-            setMaterialQtys((prev) => ({ ...prev, ...newQtys }));
-            setMaterialUnits((prev) => ({ ...prev, ...newUnits }));
-          }
-        } catch (error) {
-          console.warn("Failed to load step 11 data:", error);
-        }
-      };
-
-      loadStep11Data();
-    }
-  }, [step, finalBillNo, dbStep11Items]);
-
-  // ------------------- Cart persistence (DB only) -------------------
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Non-blocking: fetch BOQs list once on mount for Step 9 dropdowns (if API is available)
-  useEffect(() => {
-    fetchSavedBoqs().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Load savedStep9Materials and meta from DB
-  useEffect(() => {
-    const loadFromDB = async () => {
-      if (finalBillNo) {
-        try {
-          const res = await apiFetch(
-            `/api/estimator-step9-items?session_id=${finalBillNo}&estimator=blinds`,
-            {
-              headers: {},
-            },
-          );
-          if (res.ok) {
-            const data = await res.json();
-            const mats = data.items.map((item: any) => ({
-              id: item.material_id,
-              rowId: item.row_id,
-              batchId: item.batch_id,
-              name: item.name,
-              unit: item.unit,
-              quantity: item.quantity,
-              supplyRate: item.supply_rate,
-              installRate: item.install_rate,
-              shopId: item.shop_id,
-              shopName: item.shop_name,
-              description: item.description,
-              location: item.location,
-              doorType: item.door_type,
-              panelType: item.panel_type,
-              subOption: item.sub_option,
-              glazingType: item.glazing_type,
-            }));
-            setSavedStep9Materials(mats);
-            // Also set meta if available
-            if (data.items.length > 0) {
-              const first = data.items[0];
-              setSavedStep9Meta({
-                doorType: first.door_type,
-                panelType: first.panel_type,
-                subOption: first.sub_option,
-                glazingType: first.glazing_type,
-                count: first.qty,
-                height: first.height,
-                width: first.width,
-                glassHeight: first.glass_height,
-                glassWidth: first.glass_width,
-                subtotal: first.subtotal,
-                sgst: first.sgst,
-                cgst: first.cgst,
-                round_off: first.round_off,
-                grand_total: first.grand_total,
-              });
-            }
-          }
-        } catch (e) {
-          console.warn("Failed to load step 9 from DB", e);
-        }
-      }
-    };
-    loadFromDB();
-  }, [finalBillNo]);
-
   // Auto-save cart (debounced): store in browser storage and POST silently to server
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
-      const payload: any = {
-        id: `local-cart-${Date.now()}`,
-        estimator: "blinds",
-        bill_no: finalBillNo,
-        door_type: doorType,
-        panel_type: panelType,
-        sub_option: subOption,
-        glazing_type: glazingType,
-        qty: count,
-        height,
-        width,
-        glass_height: glassHeight,
-        glass_width: glassWidth,
-        selectedMaterials,
-        editableMaterials,
-        materialDescriptions,
-        materialLocations,
-        created_at: new Date().toISOString(),
-      };
-
-      try {
-        // Removed browser storage save
-        // browser storage.setItem(cartStorageKey, JSON.stringify(payload));
-      } catch (e) {
-        // ignore
-      }
-
       try {
         if (!finalBillNo) return;
 
@@ -1387,15 +811,11 @@ export default function BlindsEstimator() {
             shop_name: m.shopName || "",
             description: materialDescriptions[m.id] || "",
             location: materialLocations[m.id] || "",
-            door_type: doorType,
-            panel_type: panelType,
+            blind_type: blindType,
             sub_option: subOption,
-            glazing_type: glazingType,
             qty: count,
             height,
             width,
-            glass_height: glassHeight,
-            glass_width: glassWidth,
           };
         });
 
@@ -1423,15 +843,11 @@ export default function BlindsEstimator() {
     editableMaterials,
     materialDescriptions,
     materialLocations,
-    doorType,
-    panelType,
+    blindType,
     subOption,
-    glazingType,
     count,
     height,
     width,
-    glassHeight,
-    glassWidth,
     finalBillNo,
   ]);
 
@@ -1473,7 +889,7 @@ export default function BlindsEstimator() {
 
     setSelectedMaterials((prev) => [
       ...prev,
-      { materialId, selectedShopId: best.shopId, selectedBrand },
+      { materialId, selectedShopId: best.shopId, selectedBrand } as SelectedMaterialConfig,
     ]);
   };
 
@@ -1510,142 +926,15 @@ export default function BlindsEstimator() {
       prev.map((m) =>
         m.materialId === materialId
           ? {
-              ...m,
-              selectedBrand: newBrand,
-              selectedShopId: bestShopId || m.selectedShopId,
-            }
+            ...m,
+            selectedBrand: newBrand,
+            selectedShopId: bestShopId || m.selectedShopId,
+          }
           : m,
       ),
     );
   };
-  // Selection state for multi-delete on Add to BOQ page
-  const [selectedForDelete, setSelectedForDelete] = useState<string[]>([]);
 
-  const toggleSelectRow = (rowId: string) => {
-    setSelectedForDelete((prev) =>
-      prev.includes(rowId) ? prev.filter((x) => x !== rowId) : [...prev, rowId],
-    );
-  };
-
-  const toggleSelectAll = () => {
-    const ids = (
-      step === 9
-        ? getMaterialsWithDetails(cartSelections, cartEditableMaterials)
-        : getMaterialsWithDetails()
-    ).map((m) => (m as any).rowId || m.id);
-    setSelectedForDelete((prev) => (prev.length === ids.length ? [] : ids));
-  };
-
-  const handleDeleteSelected = async () => {
-    if (selectedForDelete.length === 0) return;
-
-    try {
-      // Separate saved materials (have DB ID) from new materials (don't have DB ID)
-      const savedToDelete = [];
-      const newToDelete = [];
-
-      for (const rowId of selectedForDelete) {
-        // Check if it's a saved material (has DB ID)
-        const savedMaterial = savedStep9Materials?.find(
-          (m) => `${m.batchId || ""}-${m.id}` === rowId,
-        );
-        if (savedMaterial && savedMaterial.id) {
-          // Find the DB item
-          const dbItem = dbStep9Items.find(
-            (item) => item.id === savedMaterial.id,
-          );
-          if (dbItem) {
-            savedToDelete.push(dbItem);
-          }
-        } else {
-          // It's a new material (in cart but not saved to DB)
-          const cartMaterial = cartSelections.find(
-            (s) => `${s.batchId || ""}-${s.materialId}` === rowId,
-          );
-          if (cartMaterial) {
-            newToDelete.push(cartMaterial);
-          }
-        }
-      }
-
-      // Delete saved materials from DB
-      if (savedToDelete.length > 0 && finalBillNo) {
-        await apiFetch("/api/estimator-step9-items", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            session_id: finalBillNo,
-            estimator: "blinds",
-            items: savedToDelete,
-          }),
-        });
-
-        // Remove from saved materials
-        setSavedStep9Materials((prev) =>
-          prev
-            ? prev.filter(
-                (m) => !savedToDelete.some((item) => item.id === m.id),
-              )
-            : null,
-        );
-      }
-
-      // Remove new materials from cart selections
-      if (newToDelete.length > 0) {
-        setCartSelections((prev) =>
-          prev.filter(
-            (s) =>
-              !newToDelete.some(
-                (item) =>
-                  `${item.batchId || ""}-${item.materialId}` ===
-                  `${s.batchId || ""}-${s.materialId}`,
-              ),
-          ),
-        );
-      }
-
-      // Update cart selections and editable materials
-      setCartSelections((prev) =>
-        prev.filter(
-          (s) =>
-            !selectedForDelete.includes(`${s.batchId || ""}-${s.materialId}`),
-        ),
-      );
-      setCartEditableMaterials((prev) => {
-        const copy = { ...prev };
-        selectedForDelete.forEach((id) => delete copy[id]);
-        return copy;
-      });
-
-      // Reload DB data
-      if (finalBillNo) {
-        const response = await apiFetch(
-          `/api/estimator-step9-items?session_id=${finalBillNo}&estimator=blinds`,
-          {
-            headers: {},
-          },
-        );
-        const data = await response.json();
-        setDbStep9Items(data.items || []);
-      }
-
-      toast({
-        title: "Success",
-        description: `${selectedForDelete.length} item(s) deleted successfully!`,
-      });
-    } catch (e) {
-      console.warn("Failed to delete items", e);
-      toast({
-        title: "Error",
-        description: "Failed to delete items. Please try again.",
-        variant: "destructive",
-      });
-    }
-
-    setSelectedForDelete([]);
-  };
   const handleDeleteSingle = (id: string) => {
     if (step === 9) {
       const rowId = id;
@@ -1654,7 +943,7 @@ export default function BlindsEstimator() {
         (m: any) => m.rowId === rowId || `${m.batchId || ""}-${m.id}` === rowId,
       );
       const materialId = saved ? saved.id : undefined;
-      const batchId = saved ? saved.batchId || "" : undefined;
+      const batchId = (saved as any)?.batchId || "";
 
       if (materialId) {
         setCartSelections((prev) =>
@@ -1678,8 +967,6 @@ export default function BlindsEstimator() {
         const next = (prev || []).filter(
           (m) => !(m.rowId === rowId || `${m.batchId || ""}-${m.id}` === rowId),
         );
-        // Removed browser storage save
-        // try { browser storage.setItem("doors_saved_step9", JSON.stringify(next)); } catch (e) {}
         return next;
       });
     } else {
@@ -1703,16 +990,7 @@ export default function BlindsEstimator() {
     setSelectedForDelete((prev) => prev.filter((x) => x !== id));
   };
 
-  // Saved BOQs across estimators
-  const [savedBoqs, setSavedBoqs] = useState<any[]>([]);
-  const lastBoqErrorRef = useRef<string>("");
-  const [currentSavedBoq, setCurrentSavedBoq] = useState<any | null>(null);
-  // Materials specifically saved from Step 9 (cart). Only these should appear in Step 11.
-  const [savedStep9Materials, setSavedStep9Materials] = useState<any[] | null>(
-    null,
-  );
   const [groupQtys, setGroupQtys] = useState<Record<string, number>>({});
-  const [savedStep9Meta, setSavedStep9Meta] = useState<any | null>(null);
   const fetchSavedBoqs = async () => {
     try {
       const res = await apiFetch("/api/boq");
@@ -1775,16 +1053,11 @@ export default function BlindsEstimator() {
 
       const payload = {
         estimator: "blinds",
-        billNo: finalBillNo,
-        doorType: doorType,
-        panelType: panelType,
+        blindType: blindType,
         subOption: subOption,
-        glazingType: glazingType,
         qty: count,
         height,
         width,
-        glassHeight,
-        glassWidth,
         materials:
           savedStep9Materials && savedStep9Materials.length > 0
             ? savedStep9Materials
@@ -1842,16 +1115,12 @@ export default function BlindsEstimator() {
   const handleAddProductToAccumulated = () => {
     // Always go back to Step 1 to allow adding more products
     setStep(1);
-    // Reset form to allow configuring new door
-    setDoorType(null);
-    setPanelType(null);
+    // Reset form to allow configuring new blind
+    setBlindType(null);
     setSubOption(null);
-    setVisionPanel(null);
     setCount(1);
-    setHeight(7);
-    setWidth(3);
-    setGlassHeight(0);
-    setGlassWidth(0);
+    setHeight(4);
+    setWidth(4);
     setSelectedGroupIds([]);
     setMaterialQtys({});
     setMaterialDescriptions({});
@@ -1883,12 +1152,12 @@ export default function BlindsEstimator() {
         }
       }
 
-      const groups = displayMaterials.map((m) => ({
+      const groups = (displayMaterials || []).map((m: any) => ({
         estimator: "blinds",
         session_id: finalBillNo,
         group_key:
           (m.groupKey ||
-            `${m.doorType || "door"}||${m.panelType || ""}||${m.subOption || ""}`) +
+            `${m.blindType || "blind"}||${m.subOption || ""}`) +
           "::" +
           (m.name || ""),
         group_id: m.groupId || `group_${m.groupKey || ""}`,
@@ -1903,30 +1172,30 @@ export default function BlindsEstimator() {
           (m.quantity || 0) * (step11SupplyRates[m.id] || m.supplyRate || 0),
         install_amount:
           (m.quantity || 0) * (step11InstallRates[m.id] || m.installRate || 0),
-        supply_subtotal: displayMaterials.reduce(
-          (sum, it) =>
+        supply_subtotal: (displayMaterials || []).reduce(
+          (sum: number, it: any) =>
             sum +
             (it.quantity || 0) *
-              (step11SupplyRates[it.id] || it.supplyRate || 0),
+            (step11SupplyRates[it.id] || it.supplyRate || 0),
           0,
         ),
-        install_subtotal: displayMaterials.reduce(
-          (sum, it) =>
+        install_subtotal: (displayMaterials || []).reduce(
+          (sum: number, it: any) =>
             sum +
             (it.quantity || 0) *
-              (step11InstallRates[it.id] || it.installRate || 0),
+            (step11InstallRates[it.id] || it.installRate || 0),
           0,
         ),
         sgst: sgst,
         cgst: cgst,
         round_off: roundOff,
         grand_total:
-          displayMaterials.reduce(
-            (sum, it) =>
+          (displayMaterials || []).reduce(
+            (sum: number, it: any) =>
               sum +
               (it.quantity || 0) *
-                ((step11SupplyRates[it.id] || it.supplyRate || 0) +
-                  (step11InstallRates[it.id] || it.installRate || 0)),
+              ((step11SupplyRates[it.id] || it.supplyRate || 0) +
+                (step11InstallRates[it.id] || it.installRate || 0)),
             0,
           ) +
           sgst +
@@ -2001,26 +1270,22 @@ export default function BlindsEstimator() {
   const handleLoadBoq = (b: any) => {
     // Load basic fields and materials into current estimate
     setFinalBillNo(b.bill_no || "");
-    setDoorType(b.door_type || null);
-    setPanelType(b.panel_type || null);
+    setBlindType(b.blind_type || b.door_type || null);
     setSubOption(b.sub_option || null);
-    setGlazingType(b.glazing_type || null);
     setCount(b.qty || 1);
-    setHeight(b.height || 7);
-    setWidth(b.width || 3);
-    setGlassHeight(b.glass_height || 6);
-    setGlassWidth(b.glass_width || 2);
+    setHeight(b.height || 4);
+    setWidth(b.width || 4);
 
     // Try to reconstruct selectedMaterials from saved materials array
     if (Array.isArray(b.materials)) {
       const selections: SelectedMaterialConfig[] = b.materials.map(
         (m: any) => ({
           materialId: m.id,
-          selectedShopId: m.shopId || m.shop_id || m.shopId || "",
+          selectedShopId: m.shopId || m.shop_id || "",
           selectedBrand: m.shopName || m.brand || m.selectedBrand || undefined,
         }),
       );
-      setSelectedMaterials(selections.filter(Boolean));
+      setSelectedMaterials(selections as SelectedMaterialConfig[]);
     }
     setCurrentSavedBoq(b);
   };
@@ -2102,7 +1367,7 @@ export default function BlindsEstimator() {
       html2pdf()
         .set({
           margin: [10, 10, 10, 10],
-          filename: "Door_BOQ.pdf",
+          filename: "Blinds_BOQ.pdf",
           image: { type: "jpeg", quality: 0.98 },
           html2canvas: {
             scale: 2,
@@ -2156,13 +1421,12 @@ export default function BlindsEstimator() {
 
   const handleExportBOQ = () => {
     const materials = getMaterialsWithDetails();
-    const doorConfig = getCurrentDoorConfig();
+    const blindConfig = getCurrentBlindConfig();
     const csvLines = [
       "BILL OF QUANTITIES (BOQ)",
       `Generated: ${new Date().toLocaleString()}`,
-      `Door Type: ${panelType === "panel" ? "With Panel" : "Without Panel"} - ${doorConfig?.label}`,
+      `Blind Type: ${blindConfig?.label}`,
       `Dimensions: ${height}ft × ${width}ft (Count: ${count})`,
-      ...(glazingType ? [`Glazing: ${glazingType}`] : []),
       "",
       "MATERIALS SCHEDULE",
       "S.No,Item,Unit,Quantity,Unit Rate,Shop,Total",
@@ -2208,12 +1472,10 @@ export default function BlindsEstimator() {
         .toString()
         .replace(/"/g, '""');
 
-      // Mirror Step 11 Item rendering: prefer a door label built from material meta, otherwise use material name
-      const perLabel = getDoorLabelFrom({
-        doorType: (m as any).doorType || (m as any).door_type,
-        panelType: (m as any).panelType || (m as any).panel_type,
+      // Mirror Step 11 Item rendering: prefer a blind label built from material meta, otherwise use material name
+      const perLabel = getBlindLabelFrom({
+        blindType: (m as any).blindType || (m as any).blind_type || (m as any).door_type,
         subOption: (m as any).subOption || (m as any).sub_option,
-        glazingType: (m as any).glazingType || (m as any).glazing_type,
       });
       const itemText = perLabel || m.name || "";
       const itemEsc = itemText.replace(/"/g, '""');
@@ -2267,10 +1529,8 @@ export default function BlindsEstimator() {
         description:
           materialDescriptions[batchKey] || materialDescriptions[m.id] || "",
         location: materialLocations[batchKey] || materialLocations[m.id] || "",
-        doorType: (m as any).doorType,
-        panelType: (m as any).panelType,
-        subOption: (m as any).subOption,
-        glazingType: (m as any).glazingType,
+        blindType: (m as any).blindType || (m as any).blind_type || (m as any).door_type,
+        subOption: (m as any).subOption || (m as any).sub_option,
         isSaved: (m as any).isSaved || false, // Check if already saved
       };
     });
@@ -2291,7 +1551,7 @@ export default function BlindsEstimator() {
     let billNoToUse = finalBillNo;
     if (!billNoToUse || billNoToUse.trim() === "") {
       // Generate a bill number if not set
-      billNoToUse = `DOOR-${Date.now()}`;
+      billNoToUse = `BLINDS-${Date.now()}`;
       setFinalBillNo(billNoToUse);
     }
 
@@ -2303,7 +1563,7 @@ export default function BlindsEstimator() {
           (sum, it) =>
             sum +
             Number(it.quantity || 0) *
-              (Number(it.supplyRate || 0) + Number(it.installRate || 0)),
+            (Number(it.supplyRate || 0) + Number(it.installRate || 0)),
           0,
         );
         const sg = s * 0.09;
@@ -2323,25 +1583,13 @@ export default function BlindsEstimator() {
       id: `local-${Date.now()}`,
       estimator: "blinds",
       bill_no: billNoToUse,
-      door_type:
-        savedStep9Meta?.doorType || savedStep9Meta?.door_type || doorType,
-      panel_type:
-        savedStep9Meta?.panelType || savedStep9Meta?.panel_type || panelType,
+      blind_type:
+        savedStep9Meta?.blindType || savedStep9Meta?.blind_type || blindType,
       sub_option:
         savedStep9Meta?.subOption || savedStep9Meta?.sub_option || subOption,
-      glazing_type:
-        savedStep9Meta?.glazingType ||
-        savedStep9Meta?.glazing_type ||
-        glazingType,
       qty: savedStep9Meta?.count || savedStep9Meta?.qty || count,
       height: savedStep9Meta?.height || height,
       width: savedStep9Meta?.width || width,
-      glass_height:
-        savedStep9Meta?.glassHeight ||
-        savedStep9Meta?.glass_height ||
-        glassHeight,
-      glass_width:
-        savedStep9Meta?.glassWidth || savedStep9Meta?.glass_width || glassWidth,
       materials: currentMaterials,
       subtotal: step8meta.subtotal,
       sgst: step8meta.sgst,
@@ -2356,7 +1604,7 @@ export default function BlindsEstimator() {
     // Removed browser storage saves - now only DB storage
     try {
       // persist meta (ensure Step-8 grand total is saved alongside saved materials)
-      setSavedStep9Meta((prev) => ({ ...(prev || {}), ...step8meta }));
+      setSavedStep9Meta((prev: any) => ({ ...(prev || {}), ...step8meta }));
     } catch (e) {
       /* ignore */
     }
@@ -2378,17 +1626,12 @@ export default function BlindsEstimator() {
       shop_name: m.shopName || "",
       description: m.description || "",
       location: m.location || "",
-      door_type:
-        m.doorType ||
-        savedStep9Meta?.doorType ||
+      blind_type:
+        m.blindType || m.blind_type || m.door_type ||
+        savedStep9Meta?.blindType ||
+        savedStep9Meta?.blind_type ||
         savedStep9Meta?.door_type ||
-        doorType ||
-        null,
-      panel_type:
-        m.panelType ||
-        savedStep9Meta?.panelType ||
-        savedStep9Meta?.panel_type ||
-        panelType ||
+        blindType ||
         null,
       sub_option:
         m.subOption ||
@@ -2396,21 +1639,9 @@ export default function BlindsEstimator() {
         savedStep9Meta?.sub_option ||
         subOption ||
         null,
-      glazing_type:
-        m.glazingType ||
-        savedStep9Meta?.glazingType ||
-        savedStep9Meta?.glazing_type ||
-        glazingType ||
-        null,
       qty: savedStep9Meta?.count || savedStep9Meta?.qty || count,
       height: savedStep9Meta?.height || height,
       width: savedStep9Meta?.width || width,
-      glass_height:
-        savedStep9Meta?.glassHeight ||
-        savedStep9Meta?.glass_height ||
-        glassHeight,
-      glass_width:
-        savedStep9Meta?.glassWidth || savedStep9Meta?.glass_width || glassWidth,
       subtotal: step8meta.subtotal,
       sgst: step8meta.sgst,
       cgst: step8meta.cgst,
@@ -2449,7 +1680,7 @@ export default function BlindsEstimator() {
             (unsaved: any) =>
               m.rowId === unsaved.rowId ||
               `${m.batchId || ""}-${m.id}` ===
-                `${unsaved.batchId || ""}-${unsaved.id}`,
+              `${unsaved.batchId || ""}-${unsaved.id}`,
           );
           return wasSaved ? { ...m, isSaved: true } : m;
         },
@@ -2479,17 +1710,13 @@ export default function BlindsEstimator() {
     return Math.abs(hash >>> 0).toString(36);
   };
 
-  const buildDoorBatchId = (): string => {
+  const buildBlindBatchId = (): string => {
     const signature = JSON.stringify({
-      doorType,
-      panelType,
+      blindType,
       subOption,
-      glazingType,
       count,
       height,
       width,
-      glassHeight,
-      glassWidth,
       selectedMaterials: (selectedMaterials || []).map((s: any) => ({
         materialId: s.materialId,
         selectedShopId: s.selectedShopId,
@@ -2504,7 +1731,7 @@ export default function BlindsEstimator() {
 
   const addToCartAndOpenStep9 = () => {
     // Build materials from current selections (not from cart) when adding to cart
-    const batchId = buildDoorBatchId(); // Stable batch ID to prevent duplicates on repeated Add to BOM
+    const batchId = buildBlindBatchId(); // Stable batch ID to prevent duplicates on repeated Add to BOM
     const mats = getMaterialsWithDetails(
       selectedMaterials,
       editableMaterials,
@@ -2521,11 +1748,9 @@ export default function BlindsEstimator() {
       shopName: m.shopName,
       description: materialDescriptions[m.id] || "",
       location: materialLocations[m.id] || "",
-      doorType: doorType, // Store door type with this batch
-      productLabel: selectedDoorProductLabel || getDoorLabelFrom(),
-      panelType: panelType,
+      blindType: blindType, // Store blind type with this batch
+      productLabel: selectedBlindProductLabel || getBlindLabelFrom(),
       subOption: subOption,
-      glazingType: glazingType,
       isSaved: false, // Mark as unsaved when newly added
     }));
 
@@ -2577,15 +1802,11 @@ export default function BlindsEstimator() {
       const grandTotalStep8 =
         subTotalStep8 + sgstStep8 + cgstStep8 + roundOffStep8;
       const meta: any = {
-        doorType,
-        panelType,
+        blindType,
         subOption,
-        glazingType,
         count,
         height,
         width,
-        glassHeight,
-        glassWidth,
         subtotal: subTotalStep8,
         sgst: sgstStep8,
         cgst: cgstStep8,
@@ -2614,10 +1835,10 @@ export default function BlindsEstimator() {
     (sum, m) =>
       sum +
       m.quantity *
-        ((currentEditableBag[m.id]?.supplyRate ?? m.rate) +
-          (currentEditableBag[m.id]?.installRate ??
-            (m as any).installRate ??
-            0)),
+      ((currentEditableBag[m.id]?.supplyRate ?? m.rate) +
+        (currentEditableBag[m.id]?.installRate ??
+          (m as any).installRate ??
+          0)),
     0,
   );
 
@@ -2629,7 +1850,7 @@ export default function BlindsEstimator() {
 
   const grandTotal = subTotal + sgst + cgst + roundOff;
 
-  // Presentation values: Step 11 should show aggregated BOQ lines — one line per main item (door type).
+  // Presentation values: Step 11 should show aggregated BOQ lines — one line per main item (blind type).
   // Prefer the BOQ that was just finalized (currentSavedBoq) so Step 11 shows only selected items.
   const _srcMaterials: any[] =
     accumulatedProducts.length > 0
@@ -2639,8 +1860,8 @@ export default function BlindsEstimator() {
         : materials && materials.length > 0
           ? materials
           : currentSavedBoq &&
-              currentSavedBoq.materials &&
-              currentSavedBoq.materials.length > 0
+            currentSavedBoq.materials &&
+            currentSavedBoq.materials.length > 0
             ? Array.isArray(currentSavedBoq.materials)
               ? currentSavedBoq.materials
               : JSON.parse(currentSavedBoq.materials || "[]")
@@ -2649,28 +1870,22 @@ export default function BlindsEstimator() {
   const grouped = (() => {
     const map = new Map<string, any[]>();
     for (const m of _srcMaterials || []) {
-      const dt =
+      const bt =
         (m as any).productLabel ||
-        (m as any).doorType ||
+        (m as any).blindType ||
+        (m as any).blind_type ||
         (m as any).door_type ||
-        savedStep9Meta?.doorType ||
-        savedStep9Meta?.door_type ||
-        doorType ||
-        "door";
-      const pt =
-        (m as any).panelType ||
-        (m as any).panel_type ||
-        savedStep9Meta?.panelType ||
-        savedStep9Meta?.panel_type ||
-        panelType ||
-        "";
+        savedStep9Meta?.blindType ||
+        savedStep9Meta?.blind_type ||
+        blindType ||
+        "blind";
       const so =
         (m as any).subOption ||
         (m as any).sub_option ||
         savedStep9Meta?.subOption ||
         savedStep9Meta?.sub_option ||
         "";
-      const key = `${dt}||${pt}||${so}`;
+      const key = `${bt}||${so}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(m);
     }
@@ -2685,10 +1900,10 @@ export default function BlindsEstimator() {
       // prefer explicit numeric groupQtys state, then Qty in description, then saved meta
       let doorQty = Number(
         groupQtys[gid] ??
-          savedStep9Meta?.count ??
-          savedStep9Meta?.qty ??
-          count ??
-          1,
+        savedStep9Meta?.count ??
+        savedStep9Meta?.qty ??
+        count ??
+        1,
       );
       const match = String(groupDesc).match(/Qty:\s*(\d+(?:\.\d+)?)/);
       if (match && (groupQtys[gid] === undefined || groupQtys[gid] === null)) {
@@ -2713,7 +1928,7 @@ export default function BlindsEstimator() {
 
       const label =
         (items[0] && (items[0] as any).productLabel) ||
-        getDoorLabelFrom({ doorType: dt, panelType: pt, subOption: so }) ||
+        getBlindLabelFrom({ blindType: dt, panelType: pt, subOption: so }) ||
         dt;
 
       const cleanedDesc = String(groupDesc)
@@ -2744,7 +1959,7 @@ export default function BlindsEstimator() {
       const groupKey =
         item.group_key ||
         item.groupKey ||
-        `${item.door_type || item.doorType || "door"}||${item.panel_type || item.panelType || ""}||${item.sub_option || item.subOption || ""}`;
+        `${item.door_type || item.blindType || "door"}||${item.panel_type || item.panelType || ""}||${item.sub_option || item.subOption || ""}`;
 
       return {
         id: item.id, // Use actual database ID
@@ -2755,7 +1970,7 @@ export default function BlindsEstimator() {
           item.item ||
           item.name ||
           item.door_label ||
-          item.doorType ||
+          item.blindType ||
           item.door_type ||
           "Door",
         location: item.location || "",
@@ -2766,7 +1981,7 @@ export default function BlindsEstimator() {
         installRate: Number(item.install_rate ?? item.installRate ?? 0),
         supplyAmount: Number(item.supply_amount ?? 0),
         installAmount: Number(item.install_amount ?? 0),
-        doorType: item.door_type || item.doorType,
+        blindType: item.door_type || item.blindType,
         panelType: item.panel_type || item.panelType,
         subOption: item.sub_option || item.subOption,
       };
@@ -2775,59 +1990,59 @@ export default function BlindsEstimator() {
   const currentDisplayMaterials =
     accumulatedProducts.length === 0
       ? grouped.filter((g: any) => {
-          // Exclude materials already in DB
-          const inDb = (dbStep11Items || []).some((item: any) => {
-            const dbGroupKey =
-              item.group_key ||
-              item.groupKey ||
-              `${item.door_type || ""}||${item.panel_type || ""}||${item.sub_option || ""}`;
-            return dbGroupKey === g.groupKey;
-          });
-          return !inDb;
-        })
+        // Exclude materials already in DB
+        const inDb = (dbStep11Items || []).some((item: any) => {
+          const dbGroupKey =
+            item.group_key ||
+            item.groupKey ||
+            `${item.door_type || ""}||${item.panel_type || ""}||${item.sub_option || ""}`;
+          return dbGroupKey === g.groupKey;
+        });
+        return !inDb;
+      })
       : accumulatedProducts.map((p: any, idx: number) => ({
-          id: `accumulated_${idx}`,
-          groupKey: `${p.doorType || "door"}||${p.panelType || ""}||${p.subOption || ""}`,
-          name:
-            p.productLabel || p.materials?.[0]?.productLabel ||
-            p.doorLabel ||
-            getDoorLabelFrom({
-              doorType: p.doorType,
-              panelType: p.panelType,
-              subOption: p.subOption,
-            }) ||
-            p.doorType,
-          location: p.location || "",
-          description: p.description || "",
-          unit: "pcs",
-          quantity: p.count || 1,
-          supplyRate:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s +
-                Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
-              0,
-            ) || 0,
-          installRate:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
-              0,
-            ) || 0,
-          supplyAmount:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s +
-                Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
-              0,
-            ) || 0,
-          installAmount:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
-              0,
-            ) || 0,
-        }));
+        id: `accumulated_${idx}`,
+        groupKey: `${p.blindType || "door"}||${p.panelType || ""}||${p.subOption || ""}`,
+        name:
+          p.productLabel || p.materials?.[0]?.productLabel ||
+          p.doorLabel ||
+          getBlindLabelFrom({
+            blindType: p.blindType,
+            panelType: p.panelType,
+            subOption: p.subOption,
+          }) ||
+          p.blindType,
+        location: p.location || "",
+        description: p.description || "",
+        unit: "pcs",
+        quantity: p.count || 1,
+        supplyRate:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s +
+              Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
+            0,
+          ) || 0,
+        installRate:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
+            0,
+          ) || 0,
+        supplyAmount:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s +
+              Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
+            0,
+          ) || 0,
+        installAmount:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
+            0,
+          ) || 0,
+      }));
 
   const displayMaterials = currentDisplayMaterials || [];
 
@@ -2947,7 +2162,7 @@ export default function BlindsEstimator() {
                   className="space-y-4"
                 >
                   <Label className="text-lg font-semibold">
-                    Select Door Product
+                    Select Blind Product
                   </Label>
                   <p className="text-sm text-muted-foreground">
                     Choose a product from your database. After selecting, you’ll
@@ -2958,11 +2173,11 @@ export default function BlindsEstimator() {
                     {blindsProducts.length === 0 ? (
                       <div className="p-4 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded">
                         <div className="font-medium mb-2">
-                          No door products found in DB.
+                          No blinds products found in DB.
                         </div>
                         <div className="text-xs">
                           Tip: Ensure your products have a category/type/name
-                          that includes “Door”.
+                          that includes “Blind”.
                         </div>
                       </div>
                     ) : (
@@ -2970,12 +2185,12 @@ export default function BlindsEstimator() {
                         {blindsProducts.map((p: any) => {
                           const label = getProductLabel(p);
                           const pid = (p?.id || label).toString();
-                          const isActive = selectedDoorProductId === pid;
+                          const isActive = selectedBlindProductId === pid;
                           return (
                             <Button
                               key={pid}
                               variant={isActive ? "default" : "outline"}
-                              onClick={() => handleSelectDoorProduct(p)}
+                              onClick={() => handleSelectBlindProduct(p)}
                               className="justify-start h-auto py-4 text-left"
                             >
                               <div>
@@ -3104,9 +2319,9 @@ export default function BlindsEstimator() {
                         {(displayMaterials || []).map((m: any, i: number) => {
                           const supplyRate = Number(
                             step11SupplyRates[m.id] ??
-                              m.supplyRate ??
-                              m.rate ??
-                              0,
+                            m.supplyRate ??
+                            m.rate ??
+                            0,
                           );
                           const installRate = Number(
                             step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -3348,11 +2563,11 @@ export default function BlindsEstimator() {
                             const filteredMaterials = currentMaterials.filter(
                               (m: any) => {
                                 const dt =
-                                  m.doorType ||
+                                  m.blindType ||
                                   m.door_type ||
-                                  savedStep9Meta?.doorType ||
+                                  savedStep9Meta?.blindType ||
                                   savedStep9Meta?.door_type ||
-                                  doorType ||
+                                  blindType ||
                                   "door";
                                 const pt =
                                   m.panelType ||
@@ -3411,18 +2626,18 @@ export default function BlindsEstimator() {
                             );
                             const baseMaterials =
                               savedStep9Materials &&
-                              savedStep9Materials.length > 0
+                                savedStep9Materials.length > 0
                                 ? savedStep9Materials
                                 : materials;
                             const filteredMaterials = (
                               baseMaterials || []
                             ).filter((m: any) => {
                               const dt =
-                                m.doorType ||
+                                m.blindType ||
                                 m.door_type ||
-                                savedStep9Meta?.doorType ||
+                                savedStep9Meta?.blindType ||
                                 savedStep9Meta?.door_type ||
-                                doorType ||
+                                blindType ||
                                 "door";
                               const pt =
                                 m.panelType ||
@@ -3477,7 +2692,7 @@ export default function BlindsEstimator() {
                               gid.replace("group_", ""),
                             );
                             filtered = accumulatedProducts.filter((p) => {
-                              const pKey = `${p.doorType || "door"}||${p.panelType || ""}||${p.subOption || ""}`;
+                              const pKey = `${p.blindType || "door"}||${p.panelType || ""}||${p.subOption || ""}`;
                               const match = keysToDelete.includes(pKey);
                               console.log(
                                 "Checking product:",
@@ -3530,9 +2745,9 @@ export default function BlindsEstimator() {
                           (m: any, i: number) => {
                             const supplyRate = Number(
                               step11SupplyRates[m.id] ??
-                                m.supplyRate ??
-                                m.rate ??
-                                0,
+                              m.supplyRate ??
+                              m.rate ??
+                              0,
                             );
                             const installRate = Number(
                               step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -3583,7 +2798,7 @@ export default function BlindsEstimator() {
                                 (existingItem: any) =>
                                   existingItem.item === currentItem.item &&
                                   existingItem.description ===
-                                    currentItem.description &&
+                                  currentItem.description &&
                                   existingItem.unit === currentItem.unit,
                               );
                             },
@@ -3642,7 +2857,7 @@ export default function BlindsEstimator() {
               )}
 
               {/* STEP 4: Sub Option */}
-              {step === 4 && doorType && (
+              {step === 4 && blindType && (
                 <motion.div
                   key="step-suboption"
                   initial={{ opacity: 0 }}
@@ -3653,12 +2868,11 @@ export default function BlindsEstimator() {
                     Select Sub Option:
                   </Label>
                   <div className="flex flex-col gap-2">
-                    {(DOOR_SUB_OPTIONS_LOCAL[doorType] || []).map((opt) => (
+                    {(BLIND_SUB_OPTIONS_LOCAL[blindType] || []).map((opt) => (
                       <Button
                         key={opt}
                         onClick={() => {
                           setSubOption(opt);
-                          setVisionPanel(null);
                         }}
                         className={`w-full text-black ${subOption === opt ? "bg-cyan-500" : "bg-white"}`}
                       >
@@ -3667,37 +2881,13 @@ export default function BlindsEstimator() {
                     ))}
                   </div>
 
-                  {doorType === "flush" && (
-                    <div className="mt-4">
-                      <p className="font-semibold text-white mb-2">
-                        Vision Panel Type:
-                      </p>
-                      <div className="flex flex-col gap-2">
-                        {VISION_PANEL_OPTIONS_LOCAL.map((opt) => (
-                          <Button
-                            key={opt}
-                            onClick={() => setVisionPanel(opt)}
-                            className={`w-full text-black ${visionPanel === opt ? "bg-cyan-500" : "bg-white"}`}
-                          >
-                            {opt}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex justify-between gap-2 pt-6">
                     <Button variant="outline" onClick={() => setStep(3)}>
                       <ChevronLeft className="mr-2 h-4 w-4" /> Back
                     </Button>
                     <Button
                       onClick={() => setStep(5)}
-                      disabled={
-                        !subOption ||
-                        (doorType === "flush" &&
-                          subOption === "With Vision Panel" &&
-                          !visionPanel)
-                      }
+                      disabled={!subOption}
                     >
                       Next <ChevronRight className="ml-2 h-4 w-4" />
                     </Button>
@@ -3714,9 +2904,9 @@ export default function BlindsEstimator() {
                   className="space-y-4"
                 >
                   <Label className="text-lg font-semibold">
-                    Door Dimensions (in feet)
+                    Blind Dimensions (in feet)
                   </Label>
-                  <div className="grid grid-cols-4 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="count">Count</Label>
                       <Input
@@ -3736,7 +2926,7 @@ export default function BlindsEstimator() {
                       <Input
                         id="height"
                         type="number"
-                        placeholder="7"
+                        placeholder="4"
                         value={height || ""}
                         onChange={(e) =>
                           setHeight(
@@ -3750,7 +2940,7 @@ export default function BlindsEstimator() {
                       <Input
                         id="width"
                         type="number"
-                        placeholder="3"
+                        placeholder="4"
                         value={width || ""}
                         onChange={(e) =>
                           setWidth(
@@ -3761,65 +2951,15 @@ export default function BlindsEstimator() {
                     </div>
                   </div>
 
-                  {getCurrentDoorConfig()?.requiresGlazing && (
-                    <div className="mt-6 pt-4 border-t">
-                      <Label className="text-lg font-semibold block mb-4">
-                        Glass Dimensions (in inches)
-                      </Label>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="glassHeight">Glass Height</Label>
-                          <Input
-                            id="glassHeight"
-                            type="number"
-                            placeholder="72"
-                            value={glassHeight || ""}
-                            onChange={(e) =>
-                              setGlassHeight(
-                                e.target.value
-                                  ? parseFloat(e.target.value)
-                                  : null,
-                              )
-                            }
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="glassWidth">Glass Width</Label>
-                          <Input
-                            id="glassWidth"
-                            type="number"
-                            placeholder="24"
-                            value={glassWidth || ""}
-                            onChange={(e) =>
-                              setGlassWidth(
-                                e.target.value
-                                  ? parseFloat(e.target.value)
-                                  : null,
-                              )
-                            }
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex justify-between gap-2 pt-6">
                     <Button
                       variant="outline"
-                      onClick={() =>
-                        setStep(getCurrentDoorConfig()?.requiresGlazing ? 4 : 3)
-                      }
+                      onClick={() => setStep(4)}
                     >
                       <ChevronLeft className="mr-2 h-4 w-4" /> Back
                     </Button>
                     <Button
-                      disabled={
-                        !count ||
-                        !height ||
-                        !width ||
-                        (getCurrentDoorConfig()?.requiresGlazing &&
-                          (!glassHeight || !glassWidth))
-                      }
+                      disabled={!count || !height || !width}
                       onClick={() => setStep(6)}
                     >
                       Next <ChevronRight className="ml-2 h-4 w-4" />
@@ -3840,7 +2980,7 @@ export default function BlindsEstimator() {
                     Select Materials & Shops
                   </Label>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Available materials for {getCurrentDoorConfig()?.label}.
+                    Available materials for {getCurrentBlindConfig()?.label}.
                     Best price shop is pre-selected.
                   </p>
 
@@ -3849,7 +2989,7 @@ export default function BlindsEstimator() {
                       id="select-all-materials"
                       checked={
                         selectedMaterials.length ===
-                          availableMaterials.length &&
+                        availableMaterials.length &&
                         availableMaterials.length > 0
                       }
                       onCheckedChange={(checked) => {
@@ -3861,7 +3001,7 @@ export default function BlindsEstimator() {
                                 .filter(
                                   (m) =>
                                     normText(m.product) ===
-                                      normText(mat.product) &&
+                                    normText(mat.product) &&
                                     normText(m.name) === normText(mat.name),
                                 )
                                 .map((m) => ({
@@ -3903,18 +3043,18 @@ export default function BlindsEstimator() {
                     {availableMaterials.length === 0 ? (
                       <div className="p-4 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded">
                         <div className="font-medium mb-2">
-                          No materials found for this door type.
+                          No materials found for this blind type.
                         </div>
                         <div>
                           Door:{" "}
-                          {doorType || selectedDoorProductLabel || "(not set)"}
+                          {blindType || selectedBlindProductLabel || "(not set)"}
                         </div>
                         <div>
                           Searching for keywords:{" "}
                           <strong>
-                            {(doorType
-                              ? doorKeywordsByType[doorType] || [doorType]
-                              : [selectedDoorProductLabel || ""]
+                            {(blindType
+                              ? doorKeywordsByType[blindType] || [blindType]
+                              : [selectedBlindProductLabel || ""]
                             ).join(", ")}
                           </strong>
                         </div>
@@ -4283,7 +3423,7 @@ export default function BlindsEstimator() {
                             PRODUCT TYPE
                           </p>
                           <p style={{ fontWeight: 600 }}>
-                            {selectedDoorProductLabel || getDoorLabelFrom()}
+                            {selectedBlindProductLabel || getBlindLabelFrom()}
                           </p>
                         </div>
                         <div>
@@ -4294,35 +3434,6 @@ export default function BlindsEstimator() {
                             {height} ft × {width} ft (Qty: {count})
                           </p>
                         </div>
-                        {glazingType && (
-                          <div>
-                            <p
-                              style={{ fontSize: "0.75rem", color: "#6b7280" }}
-                            >
-                              GLAZING
-                            </p>
-                            <p
-                              style={{
-                                fontWeight: 600,
-                                textTransform: "capitalize",
-                              }}
-                            >
-                              {glazingType}
-                            </p>
-                          </div>
-                        )}
-                        {getCurrentDoorConfig()?.requiresGlazing && (
-                          <div>
-                            <p
-                              style={{ fontSize: "0.75rem", color: "#6b7280" }}
-                            >
-                              GLASS SIZE
-                            </p>
-                            <p style={{ fontWeight: 600 }}>
-                              {glassHeight}" × {glassWidth}"
-                            </p>
-                          </div>
-                        )}
                       </div>
                     </div>
 
@@ -4364,8 +3475,8 @@ export default function BlindsEstimator() {
                                     padding: "8px",
                                     textAlign:
                                       h === "Qty" ||
-                                      h.includes("Rate") ||
-                                      h.includes("Amount")
+                                        h.includes("Rate") ||
+                                        h.includes("Amount")
                                         ? "right"
                                         : "left",
                                   }}
@@ -4532,10 +3643,10 @@ export default function BlindsEstimator() {
                     <button
                       onClick={() => {
                         setStep(1);
-                        setSelectedDoorProductId("");
-                        setSelectedDoorProductLabel("");
+                        setSelectedBlindProductId("");
+                        setSelectedBlindProductLabel("");
                         setPanelType(null);
-                        setDoorType(null);
+                        setBlindType(null);
                         setGlazingType(null);
                         setCount(1);
                         setHeight(7);
@@ -4633,9 +3744,9 @@ export default function BlindsEstimator() {
                           {(qaMaterials || []).map((m: any, i: number) => {
                             const supplyRate = Number(
                               step11SupplyRates[m.id] ??
-                                m.supplyRate ??
-                                m.rate ??
-                                0,
+                              m.supplyRate ??
+                              m.rate ??
+                              0,
                             );
                             const installRate = Number(
                               step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -4745,9 +3856,9 @@ export default function BlindsEstimator() {
                             (m: any, i: number) => {
                               const supplyRate = Number(
                                 step11SupplyRates[m.id] ??
-                                  m.supplyRate ??
-                                  m.rate ??
-                                  0,
+                                m.supplyRate ??
+                                m.rate ??
+                                0,
                               );
                               const installRate = Number(
                                 step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -4782,7 +3893,7 @@ export default function BlindsEstimator() {
                                 (existingItem: any) =>
                                   existingItem.item === currentItem.item &&
                                   existingItem.description ===
-                                    currentItem.description &&
+                                  currentItem.description &&
                                   existingItem.unit === currentItem.unit,
                               );
                             },
@@ -5208,7 +4319,17 @@ export default function BlindsEstimator() {
                     <div className="flex gap-2">
                       <Button
                         variant="destructive"
-                        onClick={handleDeleteSelected}
+                        onClick={() => {
+                          setCartSelections((prev) =>
+                            prev.filter((m) => {
+                              const batchKey = m.batchId
+                                ? `${m.batchId}-${m.materialId}`
+                                : m.materialId;
+                              return !selectedForDelete.includes(batchKey);
+                            }),
+                          );
+                          setSelectedForDelete([]);
+                        }}
                         disabled={selectedForDelete.length === 0}
                       >
                         Delete Selected
@@ -5230,10 +4351,10 @@ export default function BlindsEstimator() {
                           const selectedMats =
                             selectedForDelete.length > 0
                               ? allMats.filter((m) =>
-                                  selectedForDelete.includes(
-                                    (m as any).rowId || `${m.batchId}-${m.id}`,
-                                  ),
-                                )
+                                selectedForDelete.includes(
+                                  (m as any).rowId || `${m.batchId}-${m.id}`,
+                                ),
+                              )
                               : allMats;
 
                           const mats = selectedMats.map((m: any) => {
@@ -5268,62 +4389,34 @@ export default function BlindsEstimator() {
                                 materialLocations[batchKey] ||
                                 materialLocations[m.id] ||
                                 "",
-                              doorType: m.doorType, // Use stored door type from this item's batch
-                              panelType: m.panelType,
                               subOption: m.subOption,
-                              glazingType: m.glazingType,
                             };
                           });
 
                           if (mats.length === 0) return;
 
-                          // Use door type from first selected item's batch (since each batch has its own door type)
+                          // Use blind type from first selected item's batch (since each batch has its own blind type)
                           const firstMat = selectedMats[0];
                           const localBoq = {
                             id: `local-${Date.now()}`,
                             estimator: "blinds",
                             bill_no: finalBillNo,
-                            door_type:
-                              firstMat?.doorType ||
-                              savedStep9Meta?.doorType ||
-                              savedStep9Meta?.door_type ||
-                              doorType,
-                            panel_type:
-                              firstMat?.panelType ||
-                              savedStep9Meta?.panelType ||
-                              savedStep9Meta?.panel_type ||
-                              panelType,
+                            blind_type:
+                              firstMat?.blindType ||
+                              savedStep9Meta?.blindType ||
+                              blindType,
                             sub_option:
                               firstMat?.subOption ||
                               savedStep9Meta?.subOption ||
-                              savedStep9Meta?.sub_option ||
                               subOption,
-                            glazing_type:
-                              firstMat?.glazingType ||
-                              savedStep9Meta?.glazingType ||
-                              savedStep9Meta?.glazing_type ||
-                              glazingType,
-                            qty:
-                              savedStep9Meta?.count ||
-                              savedStep9Meta?.qty ||
-                              count,
-                            height: savedStep9Meta?.height || height,
-                            width: savedStep9Meta?.width || width,
-                            glass_height:
-                              savedStep9Meta?.glassHeight ||
-                              savedStep9Meta?.glass_height ||
-                              glassHeight,
-                            glass_width:
-                              savedStep9Meta?.glassWidth ||
-                              savedStep9Meta?.glass_width ||
-                              glassWidth,
+                            qty: mats.length,
                             materials: mats,
                             subtotal: mats.reduce(
                               (s, it) =>
                                 s +
                                 Number(it.quantity || 0) *
-                                  (Number(it.supplyRate || 0) +
-                                    Number(it.installRate || 0)),
+                                (Number(it.supplyRate || 0) +
+                                  Number(it.installRate || 0)),
                               0,
                             ),
                             sgst: 0,
@@ -5410,9 +4503,9 @@ export default function BlindsEstimator() {
                                 const ids = (
                                   step === 9
                                     ? getMaterialsWithDetails(
-                                        cartSelections,
-                                        cartEditableMaterials,
-                                      )
+                                      cartSelections,
+                                      cartEditableMaterials,
+                                    )
                                     : getMaterialsWithDetails()
                                 ).map((m) => (m as any).rowId || m.id);
                                 return (
@@ -5444,11 +4537,11 @@ export default function BlindsEstimator() {
                           >();
                           materials.forEach((m: any) => {
                             const dt =
-                              (m as any).doorType ||
+                              (m as any).blindType ||
                               (m as any).door_type ||
-                              savedStep9Meta?.doorType ||
+                              savedStep9Meta?.blindType ||
                               savedStep9Meta?.door_type ||
-                              doorType ||
+                              blindType ||
                               "door";
                             const pt =
                               (m as any).panelType ||
@@ -5490,10 +4583,10 @@ export default function BlindsEstimator() {
                               materialDescriptions[groupId] || "";
                             const groupQty = Number(
                               groupQtys[groupId] ??
-                                savedStep9Meta?.count ??
-                                savedStep9Meta?.qty ??
-                                count ??
-                                1,
+                              savedStep9Meta?.count ??
+                              savedStep9Meta?.qty ??
+                              count ??
+                              1,
                             );
 
                             rows.push(
@@ -5587,22 +4680,22 @@ export default function BlindsEstimator() {
                                 `${(m as any).batchId}-${m.id}`;
                               const supplyRate = Number(
                                 currentEditableBag[batchKey]?.supplyRate ??
-                                  currentEditableBag[m.id]?.supplyRate ??
-                                  m.rate ??
-                                  0,
+                                currentEditableBag[m.id]?.supplyRate ??
+                                m.rate ??
+                                0,
                               );
                               const installRate = Number(
                                 currentEditableBag[batchKey]?.installRate ??
-                                  currentEditableBag[m.id]?.installRate ??
-                                  (m as any).installRate ??
-                                  0,
+                                currentEditableBag[m.id]?.installRate ??
+                                (m as any).installRate ??
+                                0,
                               );
                               const combinedRate = supplyRate + installRate;
                               const qty = Number(
                                 currentEditableBag[batchKey]?.quantity ??
-                                  currentEditableBag[m.id]?.quantity ??
-                                  m.quantity ??
-                                  0,
+                                currentEditableBag[m.id]?.quantity ??
+                                m.quantity ??
+                                0,
                               );
                               const amount = qty * combinedRate;
 
@@ -5676,9 +4769,9 @@ export default function BlindsEstimator() {
                                         const newSupply = Number(
                                           currentEditableBag[batchKey]
                                             ?.supplyRate ??
-                                            currentEditableBag[m.id]
-                                              ?.supplyRate ??
-                                            supplyRate,
+                                          currentEditableBag[m.id]
+                                            ?.supplyRate ??
+                                          supplyRate,
                                         );
                                         const newInstall = Math.max(
                                           0,
@@ -5725,6 +4818,6 @@ export default function BlindsEstimator() {
           </CardContent>
         </Card>
       </div>
-    </Layout>
+    </Layout >
   );
 }
