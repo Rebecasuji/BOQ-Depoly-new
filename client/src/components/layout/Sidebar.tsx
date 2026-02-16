@@ -24,6 +24,7 @@ import {
   ShoppingCart,
   AlertCircle,
   Users,
+  Tags,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -332,6 +333,20 @@ export function Sidebar() {
                 </span>
               </Link>
 
+              <Link href="/admin/manage-product">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    location === "/admin/manage-product"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Manage Product
+                </span>
+              </Link>
+
               <Link href="/admin/manage-materials">
                 <span
                   className={cn(
@@ -343,6 +358,20 @@ export function Sidebar() {
                   onClick={() => setIsOpen(false)}
                 >
                   <Package className="h-4 w-4" /> Manage Materials
+                </span>
+              </Link>
+
+              <Link href="/admin/vendor-categories">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    location === "/admin/vendor-categories"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Tags className="h-4 w-4" /> Vendor Categories
                 </span>
               </Link>
 

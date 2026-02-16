@@ -564,17 +564,39 @@ export default function AdminDashboard() {
     setLocalShops(shops || []);
   }, [shops]);
 
+  // Fetch vendor categories for dropdowns
+  const [vendorCategories, setVendorCategories] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    const fetchVendorCategories = async () => {
+      try {
+        const response = await apiFetch("/api/vendor-categories");
+        if (response.ok) {
+          const data = await response.json();
+          setVendorCategories(data.categories || []);
+        }
+      } catch (error) {
+        console.error("Failed to load vendor categories:", error);
+      }
+    };
+    fetchVendorCategories();
+  }, []);
+
   // ===== ADMIN/SOFTWARE TEAM: Master Material (Name + Code only) =====
   const [newMasterMaterial, setNewMasterMaterial] = useState<{
     name: string;
     code: string;
     vendorCategory: string;
+    category: string;
+    subCategory: string;
     taxCodeType: 'hsn' | 'sac' | null;
     taxCodeValue: string;
   }>({
     name: "",
     code: "",
     vendorCategory: "",
+    category: "",
+    subCategory: "",
     taxCodeType: null,
     taxCodeValue: "",
   });
@@ -599,6 +621,14 @@ export default function AdminDashboard() {
       });
       return;
     }
+    if (!newMasterMaterial.category) {
+      toast({ title: "Error", description: "Category is required", variant: "destructive" });
+      return;
+    }
+    if (!newMasterMaterial.subCategory) {
+      toast({ title: "Error", description: "Subcategory is required", variant: "destructive" });
+      return;
+    }
 
     try {
       // Persist the master material as a template so suppliers can pick it
@@ -606,6 +636,8 @@ export default function AdminDashboard() {
         name: newMasterMaterial.name.trim(),
         code: newMasterMaterial.code,
         vendorCategory: newMasterMaterial.vendorCategory.trim(),
+        category: newMasterMaterial.category,
+        subcategory: newMasterMaterial.subCategory,
         taxCodeType: newMasterMaterial.taxCodeType,
         taxCodeValue: newMasterMaterial.taxCodeValue.trim(),
       };
@@ -624,6 +656,8 @@ export default function AdminDashboard() {
         name: "",
         code: "",
         vendorCategory: "",
+        category: "",
+        subCategory: "",
         taxCodeType: null,
         taxCodeValue: ""
       });
@@ -640,7 +674,7 @@ export default function AdminDashboard() {
   // ===== SUPPLIER: Detailed Material (Select from Master + Fill Details) =====
   const [selectedMasterId, setSelectedMasterId] = useState<string>("");
 
-  const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
+  const [newMaterial, setNewMaterial] = useState<Partial<Material & { vendorCategory?: string; taxCodeType?: 'hsn' | 'sac'; taxCodeValue?: string }>>({
     name: "",
     code: "",
     rate: 0,
@@ -654,6 +688,9 @@ export default function AdminDashboard() {
     dimensions: "",
     finish: "",
     metalType: "",
+    vendorCategory: "",
+    taxCodeType: undefined,
+    taxCodeValue: "",
   });
 
   const handleSelectMasterMaterial = (masterId: string) => {
@@ -1282,7 +1319,16 @@ export default function AdminDashboard() {
                                     </div>
                                     <div>
                                       <Label className="text-xs font-semibold">Vendor Category</Label>
-                                      <Input value={newShop.vendorCategory || ''} onChange={(e) => setNewShop({ ...newShop, vendorCategory: e.target.value })} placeholder="Category" />
+                                      <Select value={newShop.vendorCategory || ''} onValueChange={(v) => setNewShop({ ...newShop, vendorCategory: v })}>
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select Vendor Category" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-60 overflow-y-auto">
+                                          {vendorCategories.map((vc: any) => (
+                                            <SelectItem key={vc.id} value={vc.name}>{vc.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
                                     </div>
                                   </div>
                                   <div className="flex gap-2 pt-2">
@@ -2249,16 +2295,65 @@ export default function AdminDashboard() {
                       <Label>
                         Vendor Category
                       </Label>
-                      <Input
+                      <Select
                         value={newMasterMaterial.vendorCategory}
-                        onChange={(e) =>
+                        onValueChange={(value) =>
                           setNewMasterMaterial({
                             ...newMasterMaterial,
-                            vendorCategory: e.target.value,
+                            vendorCategory: value,
                           })
                         }
-                        placeholder="Enter vendor category"
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select vendor category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                          {vendorCategories.length === 0 ? (
+                            <SelectItem value="none" disabled>
+                              No categories available
+                            </SelectItem>
+                          ) : (
+                            vendorCategories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.name}>
+                                {cat.name}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Category</Label>
+                      <Select
+                        value={newMasterMaterial.category}
+                        onValueChange={(v) => setNewMasterMaterial({ ...newMasterMaterial, category: v, subCategory: '' })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                          {categories.map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Subcategory</Label>
+                      <Select
+                        value={newMasterMaterial.subCategory}
+                        onValueChange={(v) => setNewMasterMaterial({ ...newMasterMaterial, subCategory: v })}
+                        disabled={!newMasterMaterial.category}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Subcategory" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                          {getSubCategoriesForCategory(newMasterMaterial.category).map((sc: any) => (
+                            <SelectItem key={sc.id} value={sc.name}>{sc.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label>Tax Code Type</Label>
@@ -2368,46 +2463,188 @@ export default function AdminDashboard() {
                           <div key={template.id} className="p-4 border rounded flex items-center justify-between bg-white">
                             <div className="flex-1">
                               {editingMaterialId === template.id ? (
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    value={newMaterial.name}
-                                    onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })}
-                                    placeholder="Enter material name"
-                                    className="max-w-xs"
-                                  />
-                                  <Button size="sm" onClick={async () => {
-                                    if (!newMaterial.name.trim()) {
-                                      toast({ title: 'Error', description: 'Material name is required', variant: 'destructive' });
-                                      return;
-                                    }
-                                    try {
-                                      const res = await apiFetch(`/material-templates/${template.id}`, {
-                                        method: 'PUT',
-                                        body: JSON.stringify({ name: newMaterial.name, code: template.code })
-                                      });
-                                      if (!res.ok) {
-                                        const text = await res.text().catch(() => '');
-                                        console.error('[material-templates PUT] failed', res.status, text);
-                                        toast({ title: 'Error', description: text || 'Failed to update material (server error)', variant: 'destructive' });
-                                        throw new Error(text || 'update failed');
+                                <div className="space-y-3 w-full">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                      <Label>Item Name <span className="text-red-500">*</span></Label>
+                                      <Input
+                                        value={newMaterial.name}
+                                        onChange={(e) => setNewMaterial({ ...newMaterial, name: e.target.value })}
+                                        placeholder="Enter material name"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label>Item Code</Label>
+                                      <Input
+                                        value={template.code}
+                                        disabled
+                                        className="bg-muted"
+                                        placeholder="Auto-generated"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label>Vendor Category</Label>
+                                      <Select
+                                        value={newMaterial.vendorCategory || ""}
+                                        onValueChange={(value) => setNewMaterial({ ...newMaterial, vendorCategory: value })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select vendor category" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                                          {vendorCategories.length === 0 ? (
+                                            <SelectItem value="none" disabled>No categories available</SelectItem>
+                                          ) : (
+                                            vendorCategories.map((cat) => (
+                                              <SelectItem key={cat.id} value={cat.name}>{cat.name}</SelectItem>
+                                            ))
+                                          )}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div>
+                                      <Label>Category <span className="text-red-500">*</span></Label>
+                                      <Select
+                                        value={newMaterial.category}
+                                        onValueChange={(v) => setNewMaterial({ ...newMaterial, category: v, subCategory: '' })}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select Category" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                                          {categories.map((c) => (
+                                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div>
+                                      <Label>Subcategory <span className="text-red-500">*</span></Label>
+                                      <Select
+                                        value={newMaterial.subCategory || ""}
+                                        onValueChange={(v) => setNewMaterial({ ...newMaterial, subCategory: v })}
+                                        disabled={!newMaterial.category}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select Subcategory" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                                          {getSubCategoriesForCategory(newMaterial.category || "").map((sc: any) => (
+                                            <SelectItem key={sc.id} value={sc.name}>{sc.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div>
+                                      <Label>Tax Code Type</Label>
+                                      <div className="flex gap-4 mt-2">
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="radio"
+                                            id={`hsn-${template.id}`}
+                                            name={`taxCodeType-${template.id}`}
+                                            value="hsn"
+                                            checked={newMaterial.taxCodeType === 'hsn'}
+                                            onChange={(e) => setNewMaterial({ ...newMaterial, taxCodeType: e.target.value as 'hsn' | 'sac' })}
+                                            className="w-4 h-4"
+                                          />
+                                          <Label htmlFor={`hsn-${template.id}`} className="cursor-pointer mb-0">HSN Code</Label>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <input
+                                            type="radio"
+                                            id={`sac-${template.id}`}
+                                            name={`taxCodeType-${template.id}`}
+                                            value="sac"
+                                            checked={newMaterial.taxCodeType === 'sac'}
+                                            onChange={(e) => setNewMaterial({ ...newMaterial, taxCodeType: e.target.value as 'hsn' | 'sac' })}
+                                            className="w-4 h-4"
+                                          />
+                                          <Label htmlFor={`sac-${template.id}`} className="cursor-pointer mb-0">SAC Code</Label>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {newMaterial.taxCodeType && (
+                                      <div className="md:col-span-2">
+                                        <Label>{newMaterial.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} Code</Label>
+                                        <Input
+                                          value={newMaterial.taxCodeValue || ""}
+                                          onChange={(e) => setNewMaterial({ ...newMaterial, taxCodeValue: e.target.value })}
+                                          placeholder={`Enter ${newMaterial.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} code`}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-2 justify-end pt-2">
+                                    <Button size="sm" variant="ghost" onClick={() => setEditingMaterialId(null)}>Cancel</Button>
+                                    <Button size="sm" onClick={async () => {
+                                      if (!(newMaterial.name || "").trim()) {
+                                        toast({ title: 'Error', description: 'Material name is required', variant: 'destructive' });
+                                        return;
                                       }
-                                      const data = await res.json().catch(() => null);
-                                      setMasterMaterials(prev => prev.map(m => m.id === template.id ? { ...m, name: newMaterial.name, ...(data?.template || {}) } : m));
-                                      setEditingMaterialId(null);
-                                      toast({ title: 'Success', description: 'Material name updated' });
-                                    } catch (err) {
-                                      console.error('update error', err);
-                                      if (!(err as any)?.message) {
-                                        toast({ title: 'Error', description: 'Failed to update material', variant: 'destructive' });
+                                      if (!newMaterial.category) {
+                                        toast({ title: 'Error', description: 'Category is required', variant: 'destructive' });
+                                        return;
                                       }
-                                    }
-                                  }}>Save</Button>
-                                  <Button size="sm" variant="ghost" onClick={() => setEditingMaterialId(null)}>Cancel</Button>
+                                      if (!newMaterial.subCategory) {
+                                        toast({ title: 'Error', description: 'Subcategory is required', variant: 'destructive' });
+                                        return;
+                                      }
+                                      if (newMaterial.taxCodeType && !newMaterial.taxCodeValue?.trim()) {
+                                        toast({ title: 'Error', description: `${newMaterial.taxCodeType === 'hsn' ? 'HSN' : 'SAC'} code is required when tax code type is selected`, variant: 'destructive' });
+                                        return;
+                                      }
+                                      try {
+                                        const updateData: any = {
+                                          name: newMaterial.name,
+                                          code: template.code,
+                                          category: newMaterial.category,
+                                          subcategory: newMaterial.subCategory,
+                                          vendor_category: newMaterial.vendorCategory || null,
+                                          tax_code_type: newMaterial.taxCodeType || null,
+                                          tax_code_value: newMaterial.taxCodeValue || null
+                                        };
+
+                                        const res = await apiFetch(`/material-templates/${template.id}`, {
+                                          method: 'PUT',
+                                          body: JSON.stringify(updateData)
+                                        });
+                                        if (!res.ok) {
+                                          const text = await res.text().catch(() => '');
+                                          console.error('[material-templates PUT] failed', res.status, text);
+                                          toast({ title: 'Error', description: text || 'Failed to update material (server error)', variant: 'destructive' });
+                                          throw new Error(text || 'update failed');
+                                        }
+                                        const data = await res.json().catch(() => null);
+                                        setMasterMaterials(prev => prev.map(m => m.id === template.id ? { 
+                                          ...m, 
+                                          name: newMaterial.name, 
+                                          category: newMaterial.category, 
+                                          subcategory: newMaterial.subCategory,
+                                          vendor_category: newMaterial.vendorCategory,
+                                          tax_code_type: newMaterial.taxCodeType,
+                                          tax_code_value: newMaterial.taxCodeValue,
+                                          ...(data?.template || {}) 
+                                        } : m));
+                                        setEditingMaterialId(null);
+                                        toast({ title: 'Success', description: 'Material template updated' });
+                                      } catch (err) {
+                                        console.error('update error', err);
+                                        if (!(err as any)?.message?.includes('update failed')) {
+                                          toast({ title: 'Error', description: 'Failed to update material template', variant: 'destructive' });
+                                        }
+                                      }
+                                    }}>Save Changes</Button>
+                                  </div>
                                 </div>
                               ) : (
                                 <div>
                                   <div className="font-medium text-sm">{template.name}</div>
-                                  <div className="text-xs text-muted-foreground">{template.code} {template.category && (<span className="ml-2 text-[11px] text-gray-500">• {template.category}</span>)}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {template.code}
+                                    {template.category && (<span className="ml-2 text-[11px] text-gray-500">• {template.category}</span>)}
+                                    {(template.subcategory || template.sub_category) && (<span className="ml-1 text-[11px] text-gray-400">/ {template.subcategory || template.sub_category}</span>)}
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -2415,7 +2652,15 @@ export default function AdminDashboard() {
                               <div className="flex items-center gap-2">
                                 <Button size="sm" onClick={() => {
                                   setEditingMaterialId(template.id);
-                                  setNewMaterial({ ...newMaterial, name: template.name });
+                                  setNewMaterial({
+                                    ...newMaterial,
+                                    name: template.name,
+                                    category: template.category || '',
+                                    subCategory: template.subcategory || template.sub_category || '',
+                                    vendorCategory: template.vendor_category || '',
+                                    taxCodeType: template.tax_code_type,
+                                    taxCodeValue: template.tax_code_value || ''
+                                  });
                                 }}>Edit</Button>
                                 <Button size="sm" variant="destructive" onClick={async () => {
                                   if (!window.confirm(`Delete "${template.name}"? This cannot be undone.`)) return;
@@ -2562,13 +2807,29 @@ export default function AdminDashboard() {
 
                     <div className="space-y-2">
                       <Label>Vendor Category (Optional)</Label>
-                      <Input
+                      <Select
                         value={newShop.vendorCategory}
-                        onChange={(e) =>
-                          setNewShop({ ...newShop, vendorCategory: e.target.value })
+                        onValueChange={(value) =>
+                          setNewShop({ ...newShop, vendorCategory: value })
                         }
-                        placeholder="e.g. Hardware Supplier, Electrical Distributor"
-                      />
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select vendor category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px] overflow-y-auto">
+                          {vendorCategories.length === 0 ? (
+                            <SelectItem value="none" disabled>
+                              No categories available
+                            </SelectItem>
+                          ) : (
+                            vendorCategories.map((cat) => (
+                              <SelectItem key={cat.id} value={cat.name}>
+                                {cat.name}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                   <Button onClick={editingShopId ? handleUpdateShop : handleAddShop}>{editingShopId ? 'Save Changes' : 'Add Shop'}</Button>

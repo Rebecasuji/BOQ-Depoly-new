@@ -1,0 +1,13 @@
+--- Step 1: Find product 'demo' ---
+Found product: id=43dabf84-d7db-4bf6-ac94-fc025de559be, name=demo
+
+--- Step 2: Find configurations for this ID ---
+Found 4 configurations.
+Config: demo_1771239474845_fpk8d8goc (ID: 5d70630a-46b5-443b-89c9-84e2b4b96bb4)
+  -> Items: 3
+Config: demo 1 (ID: db39440c-7dd0-4757-8fe2-7e113380b565)
+  -> Items: 2
+Config: demo_1771235245125_ogwvep52g (ID: 44b6c43f-6249-4cd6-888c-feb579f6bd1a)
+  -> Items: 6
+Config: Default Configuration (ID: aacd6dc2-a0c5-46d5-8de8-f09aab99fdd3)
+  -> Items: 3

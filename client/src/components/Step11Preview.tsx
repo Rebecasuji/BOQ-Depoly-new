@@ -4,14 +4,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import apiFetch from "@/lib/api";
+import apiFetch, { getJSON } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { X } from "lucide-react";
+import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 
 type Product = {
   id: string;
@@ -20,6 +28,8 @@ type Product = {
   category?: string;
   subcategory?: string;
   description?: string;
+  category_name?: string;
+  subcategory_name?: string;
 };
 
 type Step11Item = {
@@ -51,155 +61,118 @@ export default function Step11Preview({
   open,
 }: Step11PreviewProps) {
   const [step11Items, setStep11Items] = useState<Step11Item[]>([]);
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [configurations, setConfigurations] = useState<any[]>([]);
+  const [selectedConfig, setSelectedConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const { toast } = useToast();
 
-  // Load Step 11 data for this product
+  // Load Step 11 snapshot for this product
   useEffect(() => {
     const loadStep11Data = async () => {
       try {
         setLoading(true);
-        // Try to fetch existing step 11 data for this product
-        // We'll look in the estimator_step11_finalize_boq table using the product subcategory as estimator type
-        const estimatorType = getEstimatorTypeFromProduct(product);
 
-        if (!estimatorType) {
-          toast({
-            title: "Error",
-            description: "Could not determine estimator type for this product",
-            variant: "destructive",
-          });
-          return;
-        }
-
-        // Fetch step 11 data - we use product ID as a key to identify stored data
-        const response = await apiFetch(
-          `/api/step11-by-product?product_id=${encodeURIComponent(product.id)}&estimator=${encodeURIComponent(estimatorType)}`,
-          { headers: {} },
+        // Fetch product configuration using the getJSON utility
+        const data = await getJSON(
+          `/api/step11-products/${encodeURIComponent(product.id)}`
         );
 
-        if (response.ok) {
-          const data = await response.json();
-          const items = data.items || [];
-          setStep11Items(items);
+        console.log("Step 11 Config Data:", data);
 
-          if (items.length === 0) {
-            toast({
-              title: "Info",
-              description: `No Step 11 data found for ${product.name}`,
-            });
-          }
+        if (data.configurations && data.configurations.length > 0) {
+          setConfigurations(data.configurations);
+          // Auto-select the first (most recent) configuration
+          const firstConfig = data.configurations[0];
+          setSelectedConfig(firstConfig);
+
+          // Use items directly from the configuration
+          const items = firstConfig.items || [];
+
+          // Convert configuration items to Step11Item format
+          const step11ItemsFromConfig = items.map((item: any, index: number) => ({
+            id: `${firstConfig.product.id}_${index}`,
+            bill_no: `TEMPLATE_${product.id}_${firstConfig.product.config_name || 'default'}_${index}`,
+            estimator: getEstimatorTypeFromProduct(product) || "generic",
+            group_id: product.id,
+            title: item.material_name || item.name || `Material ${index + 1}`,
+            description: item.description || `${product.name} - ${item.material_name || item.name || `Material ${index + 1}`}`,
+            unit: item.unit || "pcs",
+            qty: Number(item.qty || item.quantity || 1),
+            supply_rate: Number(item.supply_rate || item.rate || 0),
+            install_rate: Number(item.install_rate || 0),
+            config_id: firstConfig.product.id,
+            material_id: item.material_id,
+          }));
+
+          setStep11Items(step11ItemsFromConfig);
         } else {
-          throw new Error("Failed to load step 11 data");
+          setConfigurations([]);
+          setStep11Items([]);
+
+          // Show helpful message with action
+          toast({
+            title: "Configuration Required",
+            description: `No saved configuration found for ${product.name}. You need to create one in Manage Product first.`,
+            action: {
+              label: "Go to Manage Product",
+              onClick: () => {
+                // Navigate to Manage Product page
+                window.location.href = "/admin/manage-product";
+              }
+            }
+          });
         }
-      } catch (error) {
-        console.error("Failed to load Step 11 data:", error);
-        toast({
-          title: "Error",
-          description: "Failed to load product Step 11 data",
-          variant: "destructive",
-        });
+      } catch (error: any) {
+        console.error("Failed to load product snapshot:", error);
+        setConfigurations([]);
+        setStep11Items([]);
+
+        if (error.message?.includes("HTTP 404")) {
+          toast({
+            title: "Info",
+            description: `No saved configuration found for ${product.name}. Please configure it in Manage Product first.`,
+          });
+        } else {
+          toast({
+            title: "Error",
+            description: "Failed to load product configuration",
+            variant: "destructive",
+          });
+        }
       } finally {
         setLoading(false);
       }
     };
 
-    loadStep11Data();     
-  }, [product, toast]);
-
-  const getEstimatorTypeFromProduct = (prod: Product): string | null => {
-    const subcat = (prod.subcategory || prod.subcategory_name || "").toLowerCase();
-    const cat = (prod.category || prod.category_name || "").toLowerCase();
-    const name = (prod.name || "").toLowerCase();
-
-    if (subcat) {
-      if (subcat.includes("door")) return "doors";
-      if (subcat.includes("electrical")) return "electrical";
-      if (subcat.includes("plumb")) return "plumbing";
-      if (subcat.includes("floor")) return "flooring";
-      if (subcat.includes("paint")) return "painting";
-      if (subcat.includes("ceiling")) return "falseceiling";
-      if (subcat.includes("blind")) return "blinds";
-      if (subcat.includes("civil") || subcat.includes("wall")) return "civilwall";
-      if (subcat.includes("ms")) return "mswork";
-      if (subcat.includes("ss")) return "sswork";
-      if (subcat.includes("fire")) return "firefighting";
+    if (open && product?.id) {
+      loadStep11Data();
     }
+  }, [product, toast, open]);
 
-    if (cat) {
-      if (cat.includes("door")) return "doors";
-      if (cat.includes("electrical")) return "electrical";
-      if (cat.includes("plumb")) return "plumbing";
-      if (cat.includes("floor")) return "flooring";
-      if (cat.includes("paint")) return "painting";
-      if (cat.includes("ceiling")) return "falseceiling";
-      if (cat.includes("blind")) return "blinds";
-      if (cat.includes("civil") || cat.includes("wall")) return "civilwall";
-    }
+  // Handle configuration selection
+  const handleConfigChange = (config: any) => {
+    setSelectedConfig(config);
 
-    // fallback: normalize raw values (remove spaces/hyphens) and use that as estimator key
-    const candidate = (subcat || cat || name).trim();
-    if (candidate) {
-      const normalized = candidate.replace(/[-\s]/g, "");
-      if (/\w+/.test(normalized)) return normalized;
-    }
+    const items = config.items || [];
 
-    return null;
-  };
+    // Convert configuration items to Step11Item format
+    const step11ItemsFromConfig = items.map((item: any, index: number) => ({
+      id: `${config.product.id}_${index}`,
+      bill_no: `TEMPLATE_${product.id}_${config.product.config_name || 'default'}_${index}`,
+      estimator: getEstimatorTypeFromProduct(product) || "generic",
+      group_id: product.id,
+      title: item.material_name || item.name || `Material ${index + 1}`,
+      description: item.description || `${product.name} - ${item.material_name || item.name || `Material ${index + 1}`}`,
+      unit: item.unit || "pcs",
+      qty: Number(item.qty || item.quantity || 1),
+      supply_rate: Number(item.supply_rate || item.rate || 0),
+      install_rate: Number(item.install_rate || 0),
+      config_id: config.product.id,
+      material_id: item.material_id,
+    }));
 
-  const toggleItemSelection = (itemId: string) => {
-    const newSelected = new Set(selectedItems);
-    if (newSelected.has(itemId)) {
-      newSelected.delete(itemId);
-    } else {
-      newSelected.add(itemId);
-    }
-    setSelectedItems(newSelected);
-  };
-
-  const selectAll = () => {
-    if (selectedItems.size === step11Items.length) {
-      setSelectedItems(new Set());
-    } else {
-      const allIds = step11Items.map((item, idx) => String(idx));
-      setSelectedItems(new Set(allIds));
-    }
-  };
-
-  const handleAddToBoq = async () => {
-    if (selectedItems.size === 0) {
-      toast({
-        title: "Error",
-        description: "Please select at least one item",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsAdding(true);
-    try {
-      const selected = step11Items.filter((_, idx) =>
-        selectedItems.has(String(idx)),
-      );
-
-      console.log("Step11Preview calling onAddToBoq with items:", selected);
-
-      // Wait for the parent component's async handler to complete
-      await Promise.resolve(onAddToBoq(selected));
-
-      console.log("Step11Preview: onAddToBoq completed successfully");
-    } catch (error) {
-      console.error("Step11Preview: Error in onAddToBoq:", error);
-      toast({
-        title: "Error",
-        description: "Failed to add items to BOQ",
-        variant: "destructive",
-      });
-    } finally {
-      setIsAdding(false);
-    }
+    setStep11Items(step11ItemsFromConfig);
   };
 
   return (
@@ -221,117 +194,150 @@ export default function Step11Preview({
               Loading Step 11 data...
             </div>
           ) : step11Items.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No Step 11 data available for this product
+            <div className="text-center py-8 text-gray-500 space-y-4">
+              <div className="text-lg font-medium">No Configuration Found</div>
+              <div className="text-sm">
+                No saved configuration exists for <strong>{product.name}</strong>.
+              </div>
+              <div className="text-sm text-gray-600">
+                You need to create a product configuration in Manage Product first before you can add it to a BOQ.
+              </div>
+              <Button
+                onClick={() => window.location.href = "/admin/manage-product"}
+                variant="outline"
+                className="mt-4"
+              >
+                Go to Manage Product
+              </Button>
             </div>
           ) : (
             <>
-              {/* Selection Controls */}
-              <div className="flex justify-between items-center pb-3 border-b">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="select-all"
-                    checked={
-                      selectedItems.size === step11Items.length &&
-                      step11Items.length > 0
-                    }
-                    onCheckedChange={selectAll}
-                  />
-                  <label
-                    htmlFor="select-all"
-                    className="cursor-pointer text-sm font-medium"
+              {/* Configuration Selector */}
+              {configurations.length > 1 && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Select Configuration</Label>
+                  <Select
+                    value={selectedConfig?.product.id || ""}
+                    onValueChange={(value) => {
+                      const config = configurations.find(c => c.product.id === value);
+                      if (config) handleConfigChange(config);
+                    }}
                   >
-                    Select All ({selectedItems.size}/{step11Items.length})
-                  </label>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a configuration" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {configurations.map((config) => (
+                        <SelectItem key={config.product.id} value={config.product.id}>
+                          {config.product.config_name || 'Unnamed Configuration'}
+                          (Created: {new Date(config.product.created_at).toLocaleDateString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
+              )}
 
-              {/* Step 11 Items List */}
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {step11Items.map((item, idx) => {
-                  const itemId = String(idx);
-                  const isSelected = selectedItems.has(itemId);
+              {/* Consolidated Item Display */}
+              <div className="space-y-4">
+                <div className="font-black text-[13px] uppercase tracking-widest mb-2 border-b-2 border-black pb-1">
+                  Product Configuration Preview
+                </div>
 
-                  return (
-                    <div
-                      key={itemId}
-                      onClick={() => toggleItemSelection(itemId)}
-                      className={`p-3 border rounded-lg transition-colors cursor-pointer ${
-                        isSelected
-                          ? "bg-blue-50 border-blue-300"
-                          : "bg-gray-50 border-gray-200"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <Checkbox
-                          id={`item-${itemId}`}
-                          checked={isSelected}
-                          onCheckedChange={() => toggleItemSelection(itemId)}
-                          className="mt-1"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                        <div className="flex-1 pointer-events-none">
-                          <div className="font-semibold">
-                            {item.title ||
-                              item.description ||
-                              `Item ${item.s_no || idx + 1}`}
-                          </div>
-                          {item.description && item.title && (
-                            <div className="text-sm text-gray-600 mt-1">
-                              {item.description}
-                            </div>
-                          )}
-                          <div className="text-xs text-gray-500 mt-2 grid grid-cols-2 gap-2">
-                            {item.qty && (
-                              <div>
-                                <span className="font-medium">Qty:</span>{" "}
-                                {item.qty} {item.unit || "pcs"}
-                              </div>
-                            )}
-                            {item.supply_rate && (
-                              <div>
-                                <span className="font-medium">Supply:</span> ₹
-                                {item.supply_rate}
-                              </div>
-                            )}
-                            {item.install_rate && (
-                              <div>
-                                <span className="font-medium">Install:</span> ₹
-                                {item.install_rate}
-                              </div>
-                            )}
-                            {item.group_id && (
-                              <div>
-                                <span className="font-medium">Group:</span>{" "}
-                                {item.group_id}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                <div className="border-2 border-black rounded-sm overflow-hidden shadow-md">
+                  <table className="w-full border-collapse">
+                    <thead className="bg-white border-b border-black">
+                      <tr className="text-[10px] font-black uppercase tracking-wider">
+                        <th className="border-r border-black p-2 text-center w-[40px]">S.No</th>
+                        <th className="border-r border-black p-2 text-left">Item</th>
+                        <th className="border-r border-black p-2 text-center w-[100px]">Location</th>
+                        <th className="border-r border-black p-2 text-left">Description</th>
+                        <th className="border-r border-black p-2 text-center w-[60px]">Unit</th>
+                        <th className="border-r border-black p-2 text-center w-[60px]">Qty</th>
+                        <th className="border-r border-black p-2 text-right w-[100px]">Supply Rate</th>
+                        <th className="border-r border-black p-2 text-right w-[100px]">Install Rate</th>
+                        <th className="p-2 text-right w-[110px]">Total Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      <tr className="text-[11px] hover:bg-muted/5 transition-colors">
+                        <td className="border-r border-black p-3 text-center font-bold">1</td>
+                        <td className="border-r border-black p-3 font-black uppercase text-xs">
+                          {product.name}
+                        </td>
+                        <td className="border-r border-black p-3 text-center italic">Main Area</td>
+                        <td className="border-r border-black p-3 text-[10px] text-muted-foreground leading-tight">
+                          Consolidated configuration for {product.name}
+                        </td>
+                        <td className="border-r border-black p-3 text-center font-bold">set</td>
+                        <td className="border-r border-black p-3 text-center font-black">1</td>
+                        <td className="border-r border-black p-3 text-right font-bold">
+                          ₹{step11Items.reduce((sum, item) => sum + (item.supply_rate || 0), 0).toLocaleString()}
+                        </td>
+                        <td className="border-r border-black p-3 text-right font-bold">
+                          ₹{step11Items.reduce((sum, item) => sum + (item.install_rate || 0), 0).toLocaleString()}
+                        </td>
+                        <td className="p-3 text-right font-black text-primary">
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.supply_rate || 0) + (item.install_rate || 0)), 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot className="bg-black/5 border-t border-black">
+                      <tr className="font-black text-[12px]">
+                        <td colSpan={8} className="p-3 text-right uppercase">Grand Total Amount (INR)</td>
+                        <td className="p-3 text-right text-primary text-sm font-black">
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.supply_rate || 0) + (item.install_rate || 0)), 0).toLocaleString()}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <p className="text-[10px] text-gray-500 italic mt-2">
+                  * This is a consolidated view of {step11Items.length} materials.
+                </p>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-2 pt-4 border-t">
+              <div className="flex gap-3 pt-6 border-t border-black/10">
                 <Button
                   variant="outline"
                   onClick={onClose}
-                  className="flex-1"
+                  className="flex-1 font-bold uppercase tracking-wider py-6"
                   disabled={isAdding}
                 >
                   Cancel
                 </Button>
                 <Button
-                  onClick={handleAddToBoq}
-                  disabled={selectedItems.size === 0 || isAdding}
-                  className="flex-1"
+                  onClick={() => {
+                    // Create single consolidated item to send to BOQ
+                    const totalSupply = step11Items.reduce((sum, item) => sum + (item.supply_rate || 0), 0);
+                    const totalInstall = step11Items.reduce((sum, item) => sum + (item.install_rate || 0), 0);
+
+                    const consolidatedItem: Step11Item = {
+                      id: `CONSOLIDATED_${product.id}_${selectedConfig?.product.id || 'default'}`,
+                      bill_no: `PRODUCT_${product.id}`,
+                      estimator: getEstimatorTypeFromProduct(product) || "generic",
+                      group_id: product.id,
+                      title: product.name,
+                      description: `Consolidated configuration for ${product.name}`,
+                      unit: "set",
+                      qty: 1,
+                      supply_rate: totalSupply,
+                      install_rate: totalInstall,
+                      config_id: selectedConfig?.product.id,
+                      // We still keep the original items in table_data hidden from main view if needed
+                      step11_items: step11Items,
+                    };
+
+                    onAddToBoq([consolidatedItem]);
+                  }}
+                  disabled={step11Items.length === 0 || isAdding}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold uppercase tracking-wider py-6 shadow-lg transition-all hover:scale-[1.02]"
                 >
                   {isAdding
                     ? "Adding..."
-                    : `Add Selected (${selectedItems.size}) to BOQ`}
+                    : "Add to BOQ"}
                 </Button>
               </div>
             </>

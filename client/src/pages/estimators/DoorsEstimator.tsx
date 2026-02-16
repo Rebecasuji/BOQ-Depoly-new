@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
+import { useNavigate, useLocation } from "wouter";
+import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -624,12 +625,12 @@ export default function DoorsEstimator() {
       selectedLabel || DOOR_TYPE_TO_PRODUCT[doorType!] || doorType!;
     const requiresGlazing = doorType
       ? [
-          "glassdoor",
-          "glass-door",
-          "stile",
-          "stile-door",
-          "glasspanel",
-        ].includes(doorType)
+        "glassdoor",
+        "glass-door",
+        "stile",
+        "stile-door",
+        "glasspanel",
+      ].includes(doorType)
       : normText(label).includes("GLASS") || normText(label).includes("STILE");
     return { label, productName, requiresGlazing };
   };
@@ -686,12 +687,12 @@ export default function DoorsEstimator() {
       doorMatched = doorType
         ? storeMaterials.filter((m) => materialMatchesDoor(m, doorType))
         : storeMaterials.filter((m) => {
-            const prod = (m.product || "").toString();
-            if (!expectedProduct) return false;
-            const p = normText(prod);
-            const e = normText(expectedProduct);
-            return p.includes(e) || e.includes(p);
-          });
+          const prod = (m.product || "").toString();
+          if (!expectedProduct) return false;
+          const p = normText(prod);
+          const e = normText(expectedProduct);
+          return p.includes(e) || e.includes(p);
+        });
     }
 
     if (doorMatched.length === 0) return [];
@@ -890,9 +891,8 @@ export default function DoorsEstimator() {
   const getProductCategory = (p: any) =>
     (p?.category || p?.type || p?.group || p?.section || "").toString();
   const isDoorProduct = (p: any) => {
-    const label = normText(getProductLabel(p));
-    const cat = normText(getProductCategory(p));
-    return label.includes("DOOR") || cat.includes("DOOR");
+    // strict check using centralized utility
+    return getEstimatorTypeFromProduct(p) === "doors";
   };
   const inferDoorTypeFromProductLabel = (label: string): string | null => {
     const s = normText(label);
@@ -1287,7 +1287,7 @@ export default function DoorsEstimator() {
 
   // Non-blocking: fetch BOQs list once on mount for Step 9 dropdowns (if API is available)
   useEffect(() => {
-    fetchSavedBoqs().catch(() => {});
+    fetchSavedBoqs().catch(() => { });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1531,10 +1531,10 @@ export default function DoorsEstimator() {
       prev.map((m) =>
         m.materialId === materialId
           ? {
-              ...m,
-              selectedBrand: newBrand,
-              selectedShopId: bestShopId || m.selectedShopId,
-            }
+            ...m,
+            selectedBrand: newBrand,
+            selectedShopId: bestShopId || m.selectedShopId,
+          }
           : m,
       ),
     );
@@ -1607,8 +1607,8 @@ export default function DoorsEstimator() {
         setSavedStep9Materials((prev) =>
           prev
             ? prev.filter(
-                (m) => !savedToDelete.some((item) => item.id === m.id),
-              )
+              (m) => !savedToDelete.some((item) => item.id === m.id),
+            )
             : null,
         );
       }
@@ -1928,14 +1928,14 @@ export default function DoorsEstimator() {
           (sum, it) =>
             sum +
             (it.quantity || 0) *
-              (step11SupplyRates[it.id] || it.supplyRate || 0),
+            (step11SupplyRates[it.id] || it.supplyRate || 0),
           0,
         ),
         install_subtotal: displayMaterials.reduce(
           (sum, it) =>
             sum +
             (it.quantity || 0) *
-              (step11InstallRates[it.id] || it.installRate || 0),
+            (step11InstallRates[it.id] || it.installRate || 0),
           0,
         ),
         sgst: sgst,
@@ -1946,8 +1946,8 @@ export default function DoorsEstimator() {
             (sum, it) =>
               sum +
               (it.quantity || 0) *
-                ((step11SupplyRates[it.id] || it.supplyRate || 0) +
-                  (step11InstallRates[it.id] || it.installRate || 0)),
+              ((step11SupplyRates[it.id] || it.supplyRate || 0) +
+                (step11InstallRates[it.id] || it.installRate || 0)),
             0,
           ) +
           sgst +
@@ -2330,7 +2330,7 @@ export default function DoorsEstimator() {
           (sum, it) =>
             sum +
             Number(it.quantity || 0) *
-              (Number(it.supplyRate || 0) + Number(it.installRate || 0)),
+            (Number(it.supplyRate || 0) + Number(it.installRate || 0)),
           0,
         );
         const sg = s * 0.09;
@@ -2476,7 +2476,7 @@ export default function DoorsEstimator() {
             (unsaved: any) =>
               m.rowId === unsaved.rowId ||
               `${m.batchId || ""}-${m.id}` ===
-                `${unsaved.batchId || ""}-${unsaved.id}`,
+              `${unsaved.batchId || ""}-${unsaved.id}`,
           );
           return wasSaved ? { ...m, isSaved: true } : m;
         },
@@ -2678,10 +2678,10 @@ export default function DoorsEstimator() {
     (sum, m) =>
       sum +
       m.quantity *
-        ((currentEditableBag[m.id]?.supplyRate ?? m.rate) +
-          (currentEditableBag[m.id]?.installRate ??
-            (m as any).installRate ??
-            0)),
+      ((currentEditableBag[m.id]?.supplyRate ?? m.rate) +
+        (currentEditableBag[m.id]?.installRate ??
+          (m as any).installRate ??
+          0)),
     0,
   );
 
@@ -2703,8 +2703,8 @@ export default function DoorsEstimator() {
         : materials && materials.length > 0
           ? materials
           : currentSavedBoq &&
-              currentSavedBoq.materials &&
-              currentSavedBoq.materials.length > 0
+            currentSavedBoq.materials &&
+            currentSavedBoq.materials.length > 0
             ? Array.isArray(currentSavedBoq.materials)
               ? currentSavedBoq.materials
               : JSON.parse(currentSavedBoq.materials || "[]")
@@ -2748,10 +2748,10 @@ export default function DoorsEstimator() {
       // prefer explicit numeric groupQtys state, then Qty in description, then saved meta
       let doorQty = Number(
         groupQtys[gid] ??
-          savedStep9Meta?.count ??
-          savedStep9Meta?.qty ??
-          count ??
-          1,
+        savedStep9Meta?.count ??
+        savedStep9Meta?.qty ??
+        count ??
+        1,
       );
       const match = String(groupDesc).match(/Qty:\s*(\d+(?:\.\d+)?)/);
       if (match && (groupQtys[gid] === undefined || groupQtys[gid] === null)) {
@@ -2834,58 +2834,58 @@ export default function DoorsEstimator() {
   const currentDisplayMaterials =
     accumulatedProducts.length === 0
       ? grouped.filter((g: any) => {
-          // Exclude materials already in DB
-          const inDb = (dbStep11Items || []).some((item: any) => {
-            const dbGroupKey =
-              item.group_key ||
-              item.groupKey ||
-              `${item.door_type || ""}||${item.panel_type || ""}||${item.sub_option || ""}`;
-            return dbGroupKey === g.groupKey;
-          });
-          return !inDb;
-        })
+        // Exclude materials already in DB
+        const inDb = (dbStep11Items || []).some((item: any) => {
+          const dbGroupKey =
+            item.group_key ||
+            item.groupKey ||
+            `${item.door_type || ""}||${item.panel_type || ""}||${item.sub_option || ""}`;
+          return dbGroupKey === g.groupKey;
+        });
+        return !inDb;
+      })
       : accumulatedProducts.map((p: any, idx: number) => ({
-          id: `accumulated_${idx}`,
-          groupKey: `${p.doorType || "door"}||${p.panelType || ""}||${p.subOption || ""}`,
-          name:
-            p.doorLabel ||
-            getDoorLabelFrom({
-              doorType: p.doorType,
-              panelType: p.panelType,
-              subOption: p.subOption,
-            }) ||
-            p.doorType,
-          location: p.location || "",
-          description: p.description || "",
-          unit: "pcs",
-          quantity: p.count || 1,
-          supplyRate:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s +
-                Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
-              0,
-            ) || 0,
-          installRate:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
-              0,
-            ) || 0,
-          supplyAmount:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s +
-                Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
-              0,
-            ) || 0,
-          installAmount:
-            p.materials?.reduce(
-              (s: number, m: any) =>
-                s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
-              0,
-            ) || 0,
-        }));
+        id: `accumulated_${idx}`,
+        groupKey: `${p.doorType || "door"}||${p.panelType || ""}||${p.subOption || ""}`,
+        name:
+          p.doorLabel ||
+          getDoorLabelFrom({
+            doorType: p.doorType,
+            panelType: p.panelType,
+            subOption: p.subOption,
+          }) ||
+          p.doorType,
+        location: p.location || "",
+        description: p.description || "",
+        unit: "pcs",
+        quantity: p.count || 1,
+        supplyRate:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s +
+              Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
+            0,
+          ) || 0,
+        installRate:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
+            0,
+          ) || 0,
+        supplyAmount:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s +
+              Number(m.quantity || 0) * Number(m.supplyRate ?? m.rate ?? 0),
+            0,
+          ) || 0,
+        installAmount:
+          p.materials?.reduce(
+            (s: number, m: any) =>
+              s + Number(m.quantity || 0) * Number(m.installRate ?? 0),
+            0,
+          ) || 0,
+      }));
 
   const displayMaterials = currentDisplayMaterials || [];
 
@@ -3160,9 +3160,9 @@ export default function DoorsEstimator() {
                         {(displayMaterials || []).map((m: any, i: number) => {
                           const supplyRate = Number(
                             step11SupplyRates[m.id] ??
-                              m.supplyRate ??
-                              m.rate ??
-                              0,
+                            m.supplyRate ??
+                            m.rate ??
+                            0,
                           );
                           const installRate = Number(
                             step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -3467,7 +3467,7 @@ export default function DoorsEstimator() {
                             );
                             const baseMaterials =
                               savedStep9Materials &&
-                              savedStep9Materials.length > 0
+                                savedStep9Materials.length > 0
                                 ? savedStep9Materials
                                 : materials;
                             const filteredMaterials = (
@@ -3586,9 +3586,9 @@ export default function DoorsEstimator() {
                           (m: any, i: number) => {
                             const supplyRate = Number(
                               step11SupplyRates[m.id] ??
-                                m.supplyRate ??
-                                m.rate ??
-                                0,
+                              m.supplyRate ??
+                              m.rate ??
+                              0,
                             );
                             const installRate = Number(
                               step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -3639,7 +3639,7 @@ export default function DoorsEstimator() {
                                 (existingItem: any) =>
                                   existingItem.item === currentItem.item &&
                                   existingItem.description ===
-                                    currentItem.description &&
+                                  currentItem.description &&
                                   existingItem.unit === currentItem.unit,
                               );
                             },
@@ -3905,7 +3905,7 @@ export default function DoorsEstimator() {
                       id="select-all-materials"
                       checked={
                         selectedMaterials.length ===
-                          availableMaterials.length &&
+                        availableMaterials.length &&
                         availableMaterials.length > 0
                       }
                       onCheckedChange={(checked) => {
@@ -3917,7 +3917,7 @@ export default function DoorsEstimator() {
                                 .filter(
                                   (m) =>
                                     normText(m.product) ===
-                                      normText(mat.product) &&
+                                    normText(mat.product) &&
                                     normText(m.name) === normText(mat.name),
                                 )
                                 .map((m) => ({
@@ -4420,8 +4420,8 @@ export default function DoorsEstimator() {
                                     padding: "8px",
                                     textAlign:
                                       h === "Qty" ||
-                                      h.includes("Rate") ||
-                                      h.includes("Amount")
+                                        h.includes("Rate") ||
+                                        h.includes("Amount")
                                         ? "right"
                                         : "left",
                                   }}
@@ -4689,9 +4689,9 @@ export default function DoorsEstimator() {
                           {(qaMaterials || []).map((m: any, i: number) => {
                             const supplyRate = Number(
                               step11SupplyRates[m.id] ??
-                                m.supplyRate ??
-                                m.rate ??
-                                0,
+                              m.supplyRate ??
+                              m.rate ??
+                              0,
                             );
                             const installRate = Number(
                               step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -4801,9 +4801,9 @@ export default function DoorsEstimator() {
                             (m: any, i: number) => {
                               const supplyRate = Number(
                                 step11SupplyRates[m.id] ??
-                                  m.supplyRate ??
-                                  m.rate ??
-                                  0,
+                                m.supplyRate ??
+                                m.rate ??
+                                0,
                               );
                               const installRate = Number(
                                 step11InstallRates[m.id] ?? m.installRate ?? 0,
@@ -4838,7 +4838,7 @@ export default function DoorsEstimator() {
                                 (existingItem: any) =>
                                   existingItem.item === currentItem.item &&
                                   existingItem.description ===
-                                    currentItem.description &&
+                                  currentItem.description &&
                                   existingItem.unit === currentItem.unit,
                               );
                             },
@@ -5288,10 +5288,10 @@ export default function DoorsEstimator() {
                           const selectedMats =
                             selectedForDelete.length > 0
                               ? allMats.filter((m) =>
-                                  selectedForDelete.includes(
-                                    (m as any).rowId || `${m.batchId}-${m.id}`,
-                                  ),
-                                )
+                                selectedForDelete.includes(
+                                  (m as any).rowId || `${m.batchId}-${m.id}`,
+                                ),
+                              )
                               : allMats;
 
                           const mats = selectedMats.map((m: any) => {
@@ -5380,8 +5380,8 @@ export default function DoorsEstimator() {
                               (s, it) =>
                                 s +
                                 Number(it.quantity || 0) *
-                                  (Number(it.supplyRate || 0) +
-                                    Number(it.installRate || 0)),
+                                (Number(it.supplyRate || 0) +
+                                  Number(it.installRate || 0)),
                               0,
                             ),
                             sgst: 0,
@@ -5403,8 +5403,8 @@ export default function DoorsEstimator() {
                           const projectParam =
                             typeof window !== "undefined"
                               ? new URLSearchParams(window.location.search).get(
-                                  "project",
-                                )
+                                "project",
+                              )
                               : null;
                           if (projectParam) {
                             try {
@@ -5425,8 +5425,8 @@ export default function DoorsEstimator() {
                                 (s, r) =>
                                   s +
                                   Number(r.qty || 0) *
-                                    (Number(r.supply_rate || 0) +
-                                      Number(r.install_rate || 0)),
+                                  (Number(r.supply_rate || 0) +
+                                    Number(r.install_rate || 0)),
                                 0,
                               );
                               const sgst = +(+subtotal * 0.09).toFixed(2);
@@ -5450,7 +5450,7 @@ export default function DoorsEstimator() {
                                     qty: 1,
                                     supply_rate: Number(
                                       savedStep9Meta?.grand_total ??
-                                        grand_total,
+                                      grand_total,
                                     ),
                                     install_rate: 0,
                                     rows,
@@ -5570,9 +5570,9 @@ export default function DoorsEstimator() {
                                 const ids = (
                                   step === 9
                                     ? getMaterialsWithDetails(
-                                        cartSelections,
-                                        cartEditableMaterials,
-                                      )
+                                      cartSelections,
+                                      cartEditableMaterials,
+                                    )
                                     : getMaterialsWithDetails()
                                 ).map((m) => (m as any).rowId || m.id);
                                 return (
@@ -5659,10 +5659,10 @@ export default function DoorsEstimator() {
                               materialDescriptions[groupId] || "";
                             const groupQty = Number(
                               groupQtys[groupId] ??
-                                savedStep9Meta?.count ??
-                                savedStep9Meta?.qty ??
-                                count ??
-                                1,
+                              savedStep9Meta?.count ??
+                              savedStep9Meta?.qty ??
+                              count ??
+                              1,
                             );
 
                             rows.push(
@@ -5756,22 +5756,22 @@ export default function DoorsEstimator() {
                                 `${(m as any).batchId}-${m.id}`;
                               const supplyRate = Number(
                                 currentEditableBag[batchKey]?.supplyRate ??
-                                  currentEditableBag[m.id]?.supplyRate ??
-                                  m.rate ??
-                                  0,
+                                currentEditableBag[m.id]?.supplyRate ??
+                                m.rate ??
+                                0,
                               );
                               const installRate = Number(
                                 currentEditableBag[batchKey]?.installRate ??
-                                  currentEditableBag[m.id]?.installRate ??
-                                  (m as any).installRate ??
-                                  0,
+                                currentEditableBag[m.id]?.installRate ??
+                                (m as any).installRate ??
+                                0,
                               );
                               const combinedRate = supplyRate + installRate;
                               const qty = Number(
                                 currentEditableBag[batchKey]?.quantity ??
-                                  currentEditableBag[m.id]?.quantity ??
-                                  m.quantity ??
-                                  0,
+                                currentEditableBag[m.id]?.quantity ??
+                                m.quantity ??
+                                0,
                               );
                               const amount = qty * combinedRate;
 
@@ -5845,9 +5845,9 @@ export default function DoorsEstimator() {
                                         const newSupply = Number(
                                           currentEditableBag[batchKey]
                                             ?.supplyRate ??
-                                            currentEditableBag[m.id]
-                                              ?.supplyRate ??
-                                            supplyRate,
+                                          currentEditableBag[m.id]
+                                            ?.supplyRate ??
+                                          supplyRate,
                                         );
                                         const newInstall = Math.max(
                                           0,

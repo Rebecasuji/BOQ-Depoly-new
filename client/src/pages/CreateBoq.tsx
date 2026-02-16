@@ -11,12 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+// import VersionHistory from "@/components/VersionHistory"; // Not found
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import apiFetch from "@/lib/api";
 import Step9Table from "@/components/estimators/Step9Table";
 import ProductPicker from "@/components/ProductPicker";
+import MaterialPicker from "@/components/MaterialPicker";
 import Step11Preview from "@/components/Step11Preview";
+import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -89,6 +92,8 @@ export default function CreateBoq() {
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showStep11Preview, setShowStep11Preview] = useState(false);
+  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
+  const [selectedMaterialTemplate, setSelectedMaterialTemplate] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
@@ -324,11 +329,105 @@ export default function CreateBoq() {
     setShowProductPicker(true);
   };
 
+  const handleAddItem = () => {
+    if (!selectedProjectId) return;
+    setShowMaterialPicker(true);
+  };
+
   const handleSelectProduct = (product: Product) => {
     // Show Step 11 preview instead of navigating
     setSelectedProduct(product);
     setShowProductPicker(false);
     setShowStep11Preview(true);
+  };
+
+  const handleSelectMaterialTemplate = (template: any) => {
+    setSelectedMaterialTemplate(template);
+    setShowMaterialPicker(false);
+    // Directly add the material template to BOQ
+    handleAddMaterialToBoq(template);
+  };
+
+  const handleAddMaterialToBoq = async (template: any) => {
+    if (!selectedProjectId || !selectedVersionId) {
+      toast({
+        title: "Error",
+        description: "Please select a project and version",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Create a single item from the material template
+      const materialItem = {
+        title: template.name,
+        description: template.name,
+        unit: "pcs", // Default unit
+        qty: 1, // Default quantity
+        supply_rate: 0, // Default rates
+        install_rate: 0,
+        location: "Main Area",
+        s_no: 1,
+      };
+
+      const response = await apiFetch("/api/boq-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: selectedProjectId,
+          version_id: selectedVersionId,
+          estimator: `material_${template.id}`,
+          table_data: {
+            product_name: template.name,
+            step11_items: [materialItem],
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API response error:", response.status, errorText);
+        throw new Error(`Failed to add material to BOQ: ${response.status} ${errorText}`);
+      }
+
+      const newItem = await response.json();
+      console.log("Material added successfully:", newItem);
+      setBoqItems((prev) => [...prev, newItem]);
+
+      toast({
+        title: "Success",
+        description: `Added ${template.name} to BOQ`,
+      });
+
+      // Reload BOQ items to get updated list
+      const loadResponse = await apiFetch(
+        `/api/boq-items/version/${encodeURIComponent(selectedVersionId)}`,
+        { headers: {} },
+      );
+      if (loadResponse.ok) {
+        const loadText = await loadResponse.text();
+        const loadCT = loadResponse.headers.get("content-type") || "";
+        if (!loadCT.toLowerCase().includes("application/json")) {
+          console.error("Reload BOQ items: non-JSON response", { url: loadResponse.url, status: loadResponse.status, bodySnippet: loadText.slice(0, 300) });
+        } else {
+          try {
+            const data = JSON.parse(loadText);
+            console.log("Reloaded BOQ items:", data);
+            setBoqItems(data.items || []);
+          } catch (e) {
+            console.error("Reload BOQ items: JSON parse failed", { url: loadResponse.url, status: loadResponse.status, error: e, bodySnippet: loadText.slice(0, 300) });
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to add material to BOQ:", error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to add material to BOQ",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleAddToBoq = async (selectedItems: Step11Item[]) => {
@@ -459,51 +558,6 @@ export default function CreateBoq() {
         variant: "destructive",
       });
     }
-  };
-
-  const getEstimatorTypeFromProduct = (product: Product): string | null => {
-    const subcat = (product.subcategory || product.subcategory_name || "").toLowerCase();
-    const cat = (product.category || product.category_name || "").toLowerCase();
-    const name = (product.name || "").toLowerCase();
-
-    // Known keyword mappings (keep old behavior)
-    const check = (s: string) => s.includes("door") || s.includes("electrical") || s.includes("plumb") || s.includes("floor") || s.includes("paint") || s.includes("ceiling") || s.includes("blind") || s.includes("civil") || s.includes("wall") || s.includes("ms") || s.includes("ss") || s.includes("fire");
-
-    if (subcat) {
-      if (subcat.includes("door")) return "doors";
-      if (subcat.includes("electrical")) return "electrical";
-      if (subcat.includes("plumb")) return "plumbing";
-      if (subcat.includes("floor")) return "flooring";
-      if (subcat.includes("paint")) return "painting";
-      if (subcat.includes("ceiling")) return "falseceiling";
-      if (subcat.includes("blind")) return "blinds";
-      if (subcat.includes("civil") || subcat.includes("wall")) return "civilwall";
-      if (subcat.includes("ms")) return "mswork";
-      if (subcat.includes("ss")) return "sswork";
-      if (subcat.includes("fire")) return "firefighting";
-    }
-
-    if (cat) {
-      if (cat.includes("door")) return "doors";
-      if (cat.includes("electrical")) return "electrical";
-      if (cat.includes("plumb")) return "plumbing";
-      if (cat.includes("floor")) return "flooring";
-      if (cat.includes("paint")) return "painting";
-      if (cat.includes("ceiling")) return "falseceiling";
-      if (cat.includes("blind")) return "blinds";
-      if (cat.includes("civil") || cat.includes("wall")) return "civilwall";
-    }
-
-    // As a fallback, if the raw subcategory/category/name looks like an estimator key created by DynamicEstimator (e.g. "residential", "falseceiling"), return the normalized form.
-    const candidate = (subcat || cat || name).trim();
-    if (candidate) {
-      // normalize by removing spaces/hyphens
-      const normalized = candidate.replace(/[-\s]/g, "");
-      // if normalized contains any letters/numbers, assume it's a valid estimator key
-      if (/\w+/.test(normalized)) return normalized;
-    }
-
-    return null;
   };
 
   const updateEditedField = (itemKey: string, field: string, value: any) => {
@@ -1157,20 +1211,37 @@ export default function CreateBoq() {
                   )}
                 </div>
 
-                {/* Add Product - Disabled if submitted */}
-                <Button
-                  onClick={handleAddProduct}
-                  className="w-full"
-                  disabled={isVersionSubmitted}
-                >
-                  Add Product +
-                </Button>
+                {/* Add Product and Add Item buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleAddProduct}
+                    className="flex-1"
+                    disabled={isVersionSubmitted}
+                    size="sm"
+                  >
+                    Add Product +
+                  </Button>
+                  <Button
+                    onClick={handleAddItem}
+                    className="flex-1"
+                    disabled={isVersionSubmitted}
+                    size="sm"
+                  >
+                    Add Item
+                  </Button>
+                </div>
 
                 <ProductPicker
                   open={showProductPicker}
                   onOpenChange={setShowProductPicker}
                   onSelectProduct={handleSelectProduct}
                   selectedProjectId={selectedProjectId}
+                />
+
+                <MaterialPicker
+                  open={showMaterialPicker}
+                  onOpenChange={setShowMaterialPicker}
+                  onSelectTemplate={handleSelectMaterialTemplate}
                 />
 
                 {selectedProduct && (
@@ -1209,17 +1280,17 @@ export default function CreateBoq() {
                         <th className="border px-2 py-2 text-left font-semibold w-10">
                           S.No
                         </th>
-                        <th className="border px-2 py-2 text-left font-semibold w-24">
+                        <th className="border px-2 py-2 text-left font-semibold w-64">
                           Item
                         </th>
 
-                        <th className="border px-2 py-2 text-left font-semibold w-24">
+                        <th className="border px-2 py-2 text-left font-semibold w-[600px]">
                           Description
                         </th>
                         <th className="border px-2 py-2 text-center font-semibold w-16">
                           Unit
                         </th>
-                        <th className="border px-2 py-2 text-center font-semibold w-18">
+                        <th className="border px-2 py-2 text-center font-semibold w-20">
                           Qty
                         </th>
                         <th
@@ -1240,16 +1311,16 @@ export default function CreateBoq() {
                       </tr>
                       <tr className="bg-gray-50 border-b border-gray-200">
                         <th colSpan={5}></th>
-                        <th className="border px-1 py-1 text-center text-xs font-medium w-14">
+                        <th className="border px-1 py-1 text-center text-xs font-medium w-24">
                           Supply
                         </th>
-                        <th className="border px-1 py-1 text-center text-xs font-medium w-14">
+                        <th className="border px-1 py-1 text-center text-xs font-medium w-24">
                           Install
                         </th>
-                        <th className="border px-1 py-1 text-center text-xs font-medium w-16">
+                        <th className="border px-1 py-1 text-center text-xs font-medium w-32">
                           Supply
                         </th>
-                        <th className="border px-1 py-1 text-center text-xs font-medium w-16">
+                        <th className="border px-1 py-1 text-center text-xs font-medium w-32">
                           Install
                         </th>
                         <th></th>
@@ -1259,7 +1330,15 @@ export default function CreateBoq() {
                       {(() => {
                         let globalSeqNo = 0;
                         return boqItems.flatMap((boqItem, boqIdx) => {
-                          const tableData = boqItem.table_data || {};
+                          let tableData = boqItem.table_data || {};
+                          if (typeof tableData === "string") {
+                            try {
+                              tableData = JSON.parse(tableData);
+                            } catch (e) {
+                              console.error("Failed to parse table_data for item", boqItem.id, e);
+                              tableData = {};
+                            }
+                          }
                           const step11Items = tableData.step11_items || [];
                           const productName =
                             tableData.product_name || boqItem.estimator;
@@ -1325,7 +1404,7 @@ export default function CreateBoq() {
                                         )
                                       }
                                       disabled={isVersionSubmitted}
-                                      className="w-full border rounded px-1 py-0.5 text-xs min-h-8 resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                      className="w-full border rounded px-1 py-0.5 text-xs min-h-[150px] resize-y disabled:bg-gray-100 disabled:cursor-not-allowed"
                                       placeholder="Enter description"
                                     />
                                   </td>

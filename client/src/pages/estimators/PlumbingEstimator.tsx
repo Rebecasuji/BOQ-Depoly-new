@@ -18,6 +18,7 @@ import { useData } from "@/lib/store";
 import { Layout } from "@/components/layout/Layout";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 
 export default function PlumbingEstimator() {
   const {
@@ -99,18 +100,7 @@ export default function PlumbingEstimator() {
   // Get plumbing products from the products list by subcategory
   const plumbingProducts = useMemo(() => {
     return (storeProducts || [])
-      .filter((p: any) => {
-        const subcat = normText(p.subcategory || p.subcategory_name || "");
-        const cat = normText(p.category || p.category_name || "");
-        return (
-          subcat.includes("PLUMB") ||
-          cat.includes("PLUMB") ||
-          subcat.includes("PIPE") ||
-          cat.includes("PIPE") ||
-          subcat.includes("WATER") ||
-          cat.includes("WATER")
-        );
-      })
+      .filter((p: any) => getEstimatorTypeFromProduct(p) === "plumbing")
       .sort((a: any, b: any) => {
         const aName = (a.name || "").toString();
         const bName = (b.name || "").toString();
@@ -124,24 +114,24 @@ export default function PlumbingEstimator() {
       typeof productNameOrObj === "string"
         ? productNameOrObj
         : productNameOrObj?.name || "";
-    
+
     if (!productName) return [];
 
     return storeMaterials.filter((m) => {
       const prod = normText(m.product || "");
       const subcat = normText(m.subCategory || "");
       const searchKey = normText(productName);
-      
+
       // Strict product field matching first
       if (prod && searchKey && (prod.includes(searchKey) || searchKey.includes(prod))) {
         return true;
       }
-      
+
       // Fallback to subcategory matching
       if (subcat && searchKey && (subcat.includes(searchKey) || searchKey.includes(subcat))) {
         return true;
       }
-      
+
       return false;
     });
   };
@@ -359,14 +349,14 @@ export default function PlumbingEstimator() {
           (s, it) =>
             s +
             it.quantity *
-              (step11SupplyRates[it.id || ""] || it.supplyRate || 0),
+            (step11SupplyRates[it.id || ""] || it.supplyRate || 0),
           0,
         ),
         install_subtotal: materials.reduce(
           (s, it) =>
             s +
             it.quantity *
-              (step11InstallRates[it.id || ""] || it.installRate || 0),
+            (step11InstallRates[it.id || ""] || it.installRate || 0),
           0,
         ),
         sgst: sgst,
@@ -551,10 +541,10 @@ export default function PlumbingEstimator() {
                                     prev.map((s) =>
                                       s.materialId === mat.id
                                         ? {
-                                            ...s,
-                                            selectedShopId:
-                                              cheapest.shopId || "",
-                                          }
+                                          ...s,
+                                          selectedShopId:
+                                            cheapest.shopId || "",
+                                        }
                                         : s,
                                     ),
                                   );
@@ -721,12 +711,12 @@ export default function PlumbingEstimator() {
                           {(
                             Number(
                               editableMaterials[m.id || ""]?.quantity ??
-                                m.quantity,
+                              m.quantity,
                             ) *
                             Number(
                               editableMaterials[m.id || ""]?.supplyRate ??
-                                m.supplyRate ??
-                                0,
+                              m.supplyRate ??
+                              0,
                             )
                           ).toFixed(2)}
                         </td>
@@ -747,11 +737,11 @@ export default function PlumbingEstimator() {
                         Number(
                           editableMaterials[m.id || ""]?.quantity ?? m.quantity,
                         ) *
-                          Number(
-                            editableMaterials[m.id || ""]?.supplyRate ??
-                              m.supplyRate ??
-                              0,
-                          ),
+                        Number(
+                          editableMaterials[m.id || ""]?.supplyRate ??
+                          m.supplyRate ??
+                          0,
+                        ),
                       0,
                     )
                     .toFixed(2)}
@@ -855,8 +845,8 @@ export default function PlumbingEstimator() {
                           <td className="p-3 text-right">
                             {Number(
                               editableMaterials[m.id || ""]?.supplyRate ??
-                                m.supplyRate ??
-                                0,
+                              m.supplyRate ??
+                              0,
                             ).toFixed(2)}
                           </td>
                           <td className="p-3">{m.shopName || "Market"}</td>
@@ -864,12 +854,12 @@ export default function PlumbingEstimator() {
                             {(
                               Number(
                                 editableMaterials[m.id || ""]?.quantity ??
-                                  m.quantity,
+                                m.quantity,
                               ) *
                               Number(
                                 editableMaterials[m.id || ""]?.supplyRate ??
-                                  m.supplyRate ??
-                                  0,
+                                m.supplyRate ??
+                                0,
                               )
                             ).toFixed(2)}
                           </td>
@@ -1087,12 +1077,12 @@ export default function PlumbingEstimator() {
                               {(
                                 Number(
                                   editableMaterials[m.id || ""]?.quantity ??
-                                    m.quantity,
+                                  m.quantity,
                                 ) *
                                 Number(
                                   editableMaterials[m.id || ""]?.supplyRate ??
-                                    m.supplyRate ??
-                                    0,
+                                  m.supplyRate ??
+                                  0,
                                 )
                               ).toFixed(2)}
                             </td>
@@ -1260,8 +1250,8 @@ export default function PlumbingEstimator() {
                           <td className="p-2 text-right">
                             {Number(
                               editableMaterials[m.id || ""]?.supplyRate ??
-                                m.supplyRate ??
-                                0,
+                              m.supplyRate ??
+                              0,
                             ).toFixed(2)}
                           </td>
                           <td className="p-2">{m.shopName || "Market"}</td>
@@ -1269,12 +1259,12 @@ export default function PlumbingEstimator() {
                             {(
                               Number(
                                 editableMaterials[m.id || ""]?.quantity ??
-                                  m.quantity,
+                                m.quantity,
                               ) *
                               Number(
                                 editableMaterials[m.id || ""]?.supplyRate ??
-                                  m.supplyRate ??
-                                  0,
+                                m.supplyRate ??
+                                0,
                               )
                             ).toFixed(2)}
                           </td>
@@ -1458,13 +1448,13 @@ export default function PlumbingEstimator() {
                           {(
                             Number(
                               editableMaterials[m.id || ""]?.quantity ??
-                                m.quantity,
+                              m.quantity,
                             ) *
                             Number(
                               step11SupplyRates[m.id || ""] ||
-                                (editableMaterials[m.id || ""]?.supplyRate ??
-                                  m.supplyRate ??
-                                  0),
+                              (editableMaterials[m.id || ""]?.supplyRate ??
+                                m.supplyRate ??
+                                0),
                             )
                           ).toFixed(2)}
                         </td>
@@ -1473,7 +1463,7 @@ export default function PlumbingEstimator() {
                           {(
                             Number(
                               editableMaterials[m.id || ""]?.quantity ??
-                                m.quantity,
+                              m.quantity,
                             ) * Number(step11InstallRates[m.id || ""] || 0)
                           ).toFixed(2)}
                         </td>
@@ -1610,17 +1600,17 @@ export default function PlumbingEstimator() {
                       {materials.map((m, i) => {
                         const supplyRate = Number(
                           step11SupplyRates[m.id || ""] ||
-                            (editableMaterials[m.id || ""]?.supplyRate ??
-                              m.supplyRate ??
-                              0),
+                          (editableMaterials[m.id || ""]?.supplyRate ??
+                            m.supplyRate ??
+                            0),
                         );
                         const installRate = Number(
                           step11InstallRates[m.id || ""] || 0,
                         );
                         const qty = Number(
                           editableMaterials[m.id || ""]?.quantity ??
-                            m.quantity ??
-                            0,
+                          m.quantity ??
+                          0,
                         );
                         const supplyAmt = qty * supplyRate;
                         const installAmt = qty * installRate;
@@ -1676,8 +1666,8 @@ export default function PlumbingEstimator() {
                             .reduce((s, m) => {
                               const qty = Number(
                                 editableMaterials[m.id || ""]?.quantity ??
-                                  m.quantity ??
-                                  0,
+                                m.quantity ??
+                                0,
                               );
                               const installRate = Number(
                                 step11InstallRates[m.id || ""] || 0,

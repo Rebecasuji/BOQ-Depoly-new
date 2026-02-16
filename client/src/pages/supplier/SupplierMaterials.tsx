@@ -37,6 +37,8 @@ interface MaterialTemplate {
   name: string;
   code: string;
   category?: string;
+  subcategory?: string;
+  sub_category?: string;
   vendor_category?: string;
   created_at: string;
 }
@@ -218,7 +220,7 @@ export default function SupplierMaterials() {
       brandname: "",
       modelnumber: "",
       category: template.category || "",
-      subcategory: "",
+      subcategory: template.subcategory || template.sub_category || "",
       product: "",
       technicalspecification: "",
       dimensions: "",
@@ -682,7 +684,7 @@ export default function SupplierMaterials() {
                   )}
 
                   {/* Subcategory */}
-                  {user?.role !== 'supplier' && (
+                  {(user?.role !== 'supplier' || formData.category) && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <Label>Subcategory</Label>
@@ -733,7 +735,7 @@ export default function SupplierMaterials() {
                   )}
 
                   {/* Technical Specification */}
-                  {user?.role !== 'supplier' && (
+                  {(user?.role !== 'supplier' || formData.technicalspecification) && (
                     <div>
                       <Label>Technical Specification</Label>
                       <Textarea

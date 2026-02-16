@@ -51,7 +51,16 @@ export default function ProductPicker({
         });
         if (response.ok) {
           const data = await response.json();
-          const productList = data.products || [];
+          const productList = (data.products || []).map((p: any) => ({
+            id: p.id, // Use base product ID
+            name: p.name,
+            code: p.code || "",
+            category: p.category,
+            subcategory: p.subcategory,
+            category_name: p.category_name,
+            subcategory_name: p.subcategory_name,
+            description: p.description
+          }));
           setProducts(productList);
           setFilteredProducts(productList);
         } else {

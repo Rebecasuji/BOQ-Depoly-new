@@ -22,6 +22,8 @@ import AdminDashboard from "@/pages/admin/AdminDashboard";
 import ManageMaterialsPage from "@/pages/admin/ManageMaterialsPage";
 import SupplierApproval from "@/pages/SupplierApproval";
 import MaterialSubmissionApproval from "@/pages/admin/MaterialSubmissionApproval";
+import ManageProduct from "@/pages/admin/ManageProduct";
+import VendorCategories from "@/pages/admin/VendorCategories";
 
 import CivilWallEstimator from "@/pages/estimators/CivilWallEstimator";
 import FlooringEstimator from "@/pages/estimators/FlooringEstimator";
@@ -97,9 +99,10 @@ function Router() {
       {/* Dynamic estimator for new database subcategories - fallback route */}
       <Route path="/estimators/:subcategory" component={DynamicEstimator} />
 
-      {/* ================= ADMIN ================= */}
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/manage-materials" component={ManageMaterialsPage} />
+      <Route path="/admin/manage-product" component={ManageProduct} />
+      <Route path="/admin/vendor-categories" component={VendorCategories} />
 
       {/* ✅ Supplier Approval (MAIN) */}
       <Route path="/admin/supplier-approval" component={SupplierApproval} />

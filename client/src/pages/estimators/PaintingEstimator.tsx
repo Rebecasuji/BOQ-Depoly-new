@@ -21,6 +21,7 @@ import { Layout } from "@/components/layout/Layout";
 import { useToast } from "@/hooks/use-toast";
 import apiFetch from "@/lib/api";
 import html2pdf from "html2pdf.js";
+import { getEstimatorTypeFromProduct } from "@/lib/estimatorUtils";
 
 const ctintLogo = "/image.png";
 
@@ -82,7 +83,7 @@ export default function PaintingEstimator() {
   const paintingProductIds = useMemo(() => {
     if (!products) return [];
     return products
-      .filter(p => p.subcategory?.toLowerCase() === "painting")
+      .filter(p => getEstimatorTypeFromProduct(p) === "painting")
       .map(p => p.id);
   }, [products]);
 
@@ -412,23 +413,23 @@ export default function PaintingEstimator() {
   // Derives product info from the materials selected, aggregating rates
   const step11DisplayProducts = useMemo(() => {
     if (!displayMaterials || displayMaterials.length === 0) return [];
-    
+
     // Use the stored product name from selection, or derive from materials
-    const productName = selectedPaintTypeName || 
-      displayMaterials[0]?.product || 
+    const productName = selectedPaintTypeName ||
+      displayMaterials[0]?.product ||
       "Painting Project";
-    
+
     // Aggregate all materials into one product-level row
     const aggregatedSupplyRate = displayMaterials.reduce((sum, m) => {
       const rate = step11SupplyRates[m.id] ?? m.rate ?? 0;
       return sum + (Number(m.quantity || 0) * Number(rate));
     }, 0);
-    
+
     const aggregatedInstallRate = displayMaterials.reduce((sum, m) => {
       const rate = step11InstallRates[m.id] ?? 0;
       return sum + (Number(m.quantity || 0) * Number(rate));
     }, 0);
-    
+
     return [{
       id: "painting_product",
       name: productName,
@@ -1267,7 +1268,7 @@ export default function PaintingEstimator() {
                             <td className="border px-2 py-1">
                               <Input
                                 placeholder="Group description"
-                                value={groupDesc?.replace(/\n?Qty:\s*\d+(?:\.\d+)?\s*$/,'') || ''}
+                                value={groupDesc?.replace(/\n?Qty:\s*\d+(?:\.\d+)?\s*$/, '') || ''}
                                 onChange={(e) => setMaterialDescriptions(prev => ({ ...prev, [groupId]: e.target.value }))}
                                 className="w-full"
                               />
@@ -1286,68 +1287,68 @@ export default function PaintingEstimator() {
                           const rate = step11SupplyRates[m.id] ?? m.rate;
                           const amount = Number(qty || 0) * Number(rate || 0);
 
-                        rows.push(
-                          <tr key={m.id}>
-                            <td className="border px-2 py-1 text-center">
-                              <Checkbox
-                                checked={selectedForDelete.includes(m.id)}
-                                onCheckedChange={() => toggleSelectItem(m.id)}
-                              />
-                            </td>
+                          rows.push(
+                            <tr key={m.id}>
+                              <td className="border px-2 py-1 text-center">
+                                <Checkbox
+                                  checked={selectedForDelete.includes(m.id)}
+                                  onCheckedChange={() => toggleSelectItem(m.id)}
+                                />
+                              </td>
 
-                            <td className="border px-2 py-1 text-center">
-                              {idx}
-                            </td>
+                              <td className="border px-2 py-1 text-center">
+                                {idx}
+                              </td>
 
-                            <td className="border px-2 py-1 font-medium">
-                              {m.name}
-                            </td>
+                              <td className="border px-2 py-1 font-medium">
+                                {m.name}
+                              </td>
 
-                            <td className="border px-2 py-1" style={{ maxWidth: 450 }}>
-                              <textarea
-                                className="h-20 w-full p-2 border rounded"
-                                placeholder="Description"
-                                value={materialDescriptions[m.id] ?? ""}
-                                onChange={(e) =>
-                                  setMaterialDescriptions(prev => ({
-                                    ...prev,
-                                    [m.id]: e.target.value,
-                                  }))
-                                }
-                              />
-                            </td>
+                              <td className="border px-2 py-1" style={{ maxWidth: 450 }}>
+                                <textarea
+                                  className="h-20 w-full p-2 border rounded"
+                                  placeholder="Description"
+                                  value={materialDescriptions[m.id] ?? ""}
+                                  onChange={(e) =>
+                                    setMaterialDescriptions(prev => ({
+                                      ...prev,
+                                      [m.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                              </td>
 
-                            <td className="border px-2 py-1 text-center">
-                              {m.unit}
-                            </td>
+                              <td className="border px-2 py-1 text-center">
+                                {m.unit}
+                              </td>
 
-                            <td className="border px-2 py-1 text-center">
-                              <Input
-                                type="number"
-                                className="h-8 text-center"
-                                value={qty}
-                                onChange={(e) =>
-                                setEditableQuantity(m.id, Number(e.target.value || 0))
-                              }
-                            />
-                            </td>
+                              <td className="border px-2 py-1 text-center">
+                                <Input
+                                  type="number"
+                                  className="h-8 text-center"
+                                  value={qty}
+                                  onChange={(e) =>
+                                    setEditableQuantity(m.id, Number(e.target.value || 0))
+                                  }
+                                />
+                              </td>
 
-                            <td className="border px-2 py-1 text-right">
-                              <Input
-                                type="number"
-                                className="h-8 text-right"
-                                value={rate}
-                                onChange={(e) =>
-                                  setEditableRate(m.id, Number(e.target.value || 0))
-                                }
-                              />
-                            </td>
+                              <td className="border px-2 py-1 text-right">
+                                <Input
+                                  type="number"
+                                  className="h-8 text-right"
+                                  value={rate}
+                                  onChange={(e) =>
+                                    setEditableRate(m.id, Number(e.target.value || 0))
+                                  }
+                                />
+                              </td>
 
-                            <td className="border px-2 py-1 text-right font-semibold">
-                              ₹{amount.toFixed(2)}
-                            </td>
-                          </tr>
-                        );
+                              <td className="border px-2 py-1 text-right font-semibold">
+                                ₹{amount.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
                         });
                       }
 

@@ -1,0 +1,12 @@
+--- Table Columns Check ---
+id: uuid
+step11_product_id: uuid
+material_id: uuid
+material_name: text
+unit: text
+qty: numeric
+rate: numeric
+amount: numeric
+supply_rate: numeric
+install_rate: numeric
+location: text

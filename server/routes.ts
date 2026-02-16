@@ -1,13 +1,11 @@
 import type { Express, Request, Response } from "express";
+import fs from "fs";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { comparePasswords, generateToken } from "./auth";
 import { authMiddleware, requireRole } from "./middleware";
 import { randomUUID } from "crypto";
 import { query } from "./db/client";
-import { sendResetPasswordEmail } from "./email";
-import crypto from "crypto";
-import bcryptjs from "bcryptjs";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -350,6 +348,43 @@ export async function registerRoutes(
     }
   }
 
+  // Ensure step11_products table has config_name column
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS step11_products (
+        id SERIAL PRIMARY KEY,
+        product_id VARCHAR(100) NOT NULL,
+        product_name VARCHAR(255) NOT NULL,
+        config_name VARCHAR(255) DEFAULT 'Default Configuration',
+        category_id VARCHAR(255),
+        subcategory_id VARCHAR(255),
+        total_cost DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS step11_product_items (
+        id SERIAL PRIMARY KEY,
+        step11_product_id INTEGER REFERENCES step11_products(id) ON DELETE CASCADE,
+        material_id VARCHAR(100),
+        material_name VARCHAR(255),
+        unit VARCHAR(50),
+        qty DECIMAL(15,2),
+        rate DECIMAL(15,2),
+        supply_rate DECIMAL(15,2),
+        install_rate DECIMAL(15,2),
+        location VARCHAR(255),
+        amount DECIMAL(15,4),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await query(`ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS config_name VARCHAR(255) DEFAULT 'Default Configuration'`);
+    console.log("[db] step11_products and items tables ensured");
+  } catch (err: unknown) {
+    console.warn("[db] Could not ensure step11_products tables:", (err as any)?.message || err);
+  }
+
   // Ensure boq_items has a user_added flag (only items explicitly saved via Add Product)
   try {
     await query(
@@ -378,6 +413,25 @@ export async function registerRoutes(
   } catch (err: unknown) {
     console.warn(
       "[db] Could not ensure material_templates columns:",
+      (err as any)?.message || err,
+    );
+  }
+
+  // Create vendor_categories table for centralized vendor category management
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS vendor_categories (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        name VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log("[db] vendor_categories table ensured");
+  } catch (err: unknown) {
+    console.warn(
+      "[db] Could not create vendor_categories table:",
       (err as any)?.message || err,
     );
   }
@@ -597,116 +651,21 @@ export async function registerRoutes(
         return;
       }
 
-      // Generate reset token
-      const resetToken = crypto.randomBytes(32).toString("hex");
-      const resetTokenHash = crypto
-        .createHash("sha256")
-        .update(resetToken)
-        .digest("hex");
-      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+      // TODO: Implement actual password reset logic
+      // - Generate reset token
+      // - Store token with expiry
+      // - Send email with reset link
 
-      // Save reset token to database
-      try {
-        await query(
-          `UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3`,
-          [resetTokenHash, resetTokenExpiry, user.id]
-        );
-      } catch (err) {
-        console.error("Failed to save reset token:", err);
-        // Column might not exist, try to add it
-        try {
-          await query(
-            `ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255)`
-          );
-          await query(
-            `ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expiry TIMESTAMP`
-          );
-          await query(
-            `UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3`,
-            [resetTokenHash, resetTokenExpiry, user.id]
-          );
-        } catch (alterErr) {
-          console.error("Failed to alter table:", alterErr);
-          throw alterErr;
-        }
-      }
-
-      // Send email with reset link
-      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-      const resetLink = `${frontendUrl}/reset-password?token=${resetToken}`;
-
-      try {
-        await sendResetPasswordEmail(email, resetLink);
-      } catch (emailErr) {
-        console.error("Failed to send email:", emailErr);
-        res.status(500).json({
-          message:
-            "Failed to send reset email. Please try again later.",
-        });
-        return;
-      }
-
-      res.status(200).json({
-        message: "Password reset link sent to your email",
-      });
+      // For now, just return success
+      console.log(`Password reset requested for: ${email}`);
+      res
+        .status(200)
+        .json({ message: "Password reset link sent to your email" });
     } catch (error) {
       console.error("Forgot password error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
-
-  // POST /api/auth/reset-password - Reset password with token
-  app.post("/api/auth/reset-password", async (req: Request, res: Response) => {
-    try {
-      const { token, newPassword } = req.body;
-
-      if (!token || !newPassword) {
-        res.status(400).json({
-          message: "Token and new password are required",
-        });
-        return;
-      }
-
-      // Hash the token to compare with stored hash
-      const tokenHash = crypto
-        .createHash("sha256")
-        .update(token)
-        .digest("hex");
-
-      // Find user with matching token and valid expiry
-      const userResult = await query(
-        `SELECT id, username FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
-        [tokenHash]
-      );
-
-      if (userResult.rows.length === 0) {
-        res.status(400).json({
-          message:
-            "Invalid or expired reset token. Please request a new password reset.",
-        });
-        return;
-      }
-
-      const userId = userResult.rows[0].id;
-
-      // Hash the new password
-      const hashedPassword = await bcryptjs.hash(newPassword, 10);
-
-      // Update password and clear reset token
-      await query(
-        `UPDATE users SET password = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2`,
-        [hashedPassword, userId]
-      );
-
-      res.status(200).json({
-        message: "Password has been reset successfully. Please log in with your new password.",
-      });
-    } catch (error) {
-      console.error("Reset password error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
 
   // ====== PROTECTED ROUTES ======
 
@@ -1071,49 +1030,67 @@ export async function registerRoutes(
     }
   });
 
-  // GET /api/my-material-submissions - Get authenticated user's material submissions for prefill
-  app.get(
-    "/api/my-material-submissions",
-    authMiddleware,
-    async (req: Request, res: Response) => {
-      try {
-        const userId = (req as any).user?.id;
-        if (!userId) {
-          res.status(401).json({ message: "Unauthorized" });
-          return;
-        }
+  // GET /api/material-rate - fetch rate for a specific material template in a shop
+  app.get("/api/material-rate", async (req, res) => {
+    try {
+      const { template_id, shop_id } = req.query;
 
-        const result = await query(
-          `SELECT * FROM material_submissions WHERE submitted_by = $1 ORDER BY submitted_at DESC`,
-          [userId],
-        );
-
-        res.json({ submissions: result.rows });
-      } catch (err) {
-        console.error("/api/my-material-submissions error", err);
-        res.status(500).json({ message: "failed to list material submissions" });
+      if (!template_id || !shop_id) {
+        res.status(400).json({
+          message: "template_id and shop_id are required",
+        });
+        return;
       }
-    },
-  );
 
-  // GET /api/material-submissions - Get all material submissions (Admin/Software/Purchase for admin view)
-  app.get(
-    "/api/material-submissions",
-    authMiddleware,
-    requireRole("admin", "software_team", "purchase_team"),
-    async (req: Request, res: Response) => {
-      try {
-        const result = await query(
-          `SELECT * FROM material_submissions ORDER BY submitted_at DESC`,
-        );
+      // First try to fetch from approved materials
+      const materialResult = await query(
+        `SELECT rate, unit, brandname, modelnumber, category, subcategory, product, technicalspecification, dimensions, finishtype, metaltype 
+         FROM materials 
+         WHERE template_id = $1 AND shop_id = $2 AND approved IS TRUE 
+         LIMIT 1`,
+        [template_id, shop_id],
+      );
 
-        res.json({ submissions: result.rows });
-      } catch (err) {
-        console.error("/api/material-submissions error", err);
-        res.status(500).json({ message: "failed to list material submissions" });
+      if (materialResult.rows.length > 0) {
+        res.json({
+          found: true,
+          source: "approved",
+          material: materialResult.rows[0],
+        });
+        return;
       }
-    },
-  );
+
+      // If no approved material found, try to fetch from material submissions
+      const submissionResult = await query(
+        `SELECT rate, unit, brandname, modelnumber, category, subcategory, product, technicalspecification, dimensions, finishtype, metaltype 
+         FROM material_submissions 
+         WHERE template_id = $1 AND shop_id = $2 
+         ORDER BY submitted_at DESC 
+         LIMIT 1`,
+        [template_id, shop_id],
+      );
+
+      if (submissionResult.rows.length > 0) {
+        res.json({
+          found: true,
+          source: "submitted",
+          material: submissionResult.rows[0],
+        });
+        return;
+      }
+
+      // No rate found
+      res.json({
+        found: false,
+        source: null,
+        material: null,
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("/api/material-rate error", err);
+      res.status(500).json({ message: "failed to fetch material rate" });
+    }
+  });
 
   // POST /api/materials - create material (authenticated)
   app.post(
@@ -1139,8 +1116,8 @@ export async function registerRoutes(
         );
 
         const result = await query(
-          `INSERT INTO materials (id, name, code, rate, shop_id, unit, category, brandname, modelnumber, subcategory, product, technicalspecification, image, attributes, master_material_id, template_id, approved, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now()) RETURNING *`,
+          `INSERT INTO materials (id, name, code, rate, shop_id, unit, category, brandname, modelnumber, subcategory, product, technicalspecification, image, attributes, master_material_id, approved, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now()) RETURNING *`,
           [
             id,
             body.name || null,
@@ -1157,7 +1134,6 @@ export async function registerRoutes(
             body.image || null,
             JSON.stringify(attributes || {}),
             body.masterMaterialId || null,
-            body.templateId || null,
             false,
           ],
         );
@@ -1200,41 +1176,77 @@ export async function registerRoutes(
     try {
       const id = req.params.id;
       const body = req.body || {};
+      console.log("PUT /api/shops/:id - Received body:", JSON.stringify(body, null, 2));
+      console.log("PUT /api/shops/:id - Shop ID:", id);
+
       const fields: string[] = [];
       const vals: any[] = [];
       let idx = 1;
-      for (const k of [
-        "name",
-        "location",
-        "phoneCountryCode",
-        "contactNumber",
-        "city",
-        "state",
-        "country",
-        "pincode",
-        "image",
-        "rating",
-        "gstNo",
-        "vendorCategory",
-      ]) {
+
+      // Map of request field names to database column names
+      const fieldMapping: Record<string, string> = {
+        "name": "name",
+        "location": "location",
+        "phoneCountryCode": "phoneCountryCode",
+        "contactNumber": "contactNumber",
+        "city": "city",
+        "state": "state",
+        "country": "country",
+        "pincode": "pincode",
+        "image": "image",
+        "rating": "rating",
+        "gstNo": "gstno",
+        "vendorCategory": "vendor_category",
+      };
+
+      for (const k of Object.keys(fieldMapping)) {
         if (body[k] !== undefined) {
-          fields.push(`${k} = $${idx++}`);
-          vals.push(body[k]);
+          let value = body[k];
+          // Special handling for rating - ensure it's a number or null
+          if (k === 'rating') {
+            value = (typeof value === 'number' && !isNaN(value)) ? value : null;
+          }
+          fields.push(`${fieldMapping[k]} = $${idx++}`);
+          vals.push(value);
         }
       }
       if (body.categories !== undefined) {
+        let categoriesValue;
+        try {
+          categoriesValue = Array.isArray(body.categories) ? JSON.stringify(body.categories) : JSON.stringify([]);
+        } catch (e) {
+          console.log("PUT /api/shops/:id - Error stringifying categories:", e);
+          categoriesValue = JSON.stringify([]);
+        }
         fields.push(`categories = $${idx++}`);
-        vals.push(JSON.stringify(body.categories));
+        vals.push(categoriesValue);
       }
+
+      console.log("PUT /api/shops/:id - Fields to update:", fields);
+      console.log("PUT /api/shops/:id - Values:", vals);
+
       if (fields.length === 0)
         return res.status(400).json({ message: "no fields" });
       vals.push(id);
       const q = `UPDATE shops SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`;
+      console.log("PUT /api/shops/:id - SQL Query:", q);
+      console.log("PUT /api/shops/:id - Final values array:", vals);
+
       const result = await query(q, vals);
+      if (result.rowCount === 0) {
+        console.log("PUT /api/shops/:id - No rows updated, shop not found");
+        return res.status(404).json({ message: "Shop not found" });
+      }
+      console.log("PUT /api/shops/:id - Update successful, rows affected:", result.rowCount);
       res.json({ shop: result.rows[0] });
     } catch (err: unknown) {
-      console.error(err as any);
-      res.status(500).json({ message: "error" });
+      console.error("PUT /api/shops/:id - Database error:", err);
+      if (err instanceof Error) {
+        console.error("PUT /api/shops/:id - Error message:", err.message);
+        console.error("PUT /api/shops/:id - Error stack:", err.stack);
+      }
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      res.status(500).json({ message: "Failed to update shop", error: errorMessage });
     }
   });
 
@@ -1473,6 +1485,135 @@ export async function registerRoutes(
     }
   });
 
+  // ====== VENDOR CATEGORIES ROUTES ======
+
+  // GET /api/vendor-categories - List all vendor categories
+  app.get("/api/vendor-categories", async (_req, res) => {
+    try {
+      const result = await query(
+        "SELECT * FROM vendor_categories ORDER BY name ASC",
+      );
+      res.json({ categories: result.rows });
+    } catch (err) {
+      console.error("/api/vendor-categories GET error", err);
+      res.status(500).json({ message: "failed to list vendor categories" });
+    }
+  });
+
+  // POST /api/vendor-categories - Create a new vendor category
+  app.post(
+    "/api/vendor-categories",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const { name, description } = req.body;
+
+        if (!name || !name.trim()) {
+          res.status(400).json({ message: "Name is required" });
+          return;
+        }
+
+        const result = await query(
+          `INSERT INTO vendor_categories (name, description, created_at, updated_at) 
+           VALUES ($1, $2, NOW(), NOW()) 
+           RETURNING *`,
+          [name.trim(), description || null],
+        );
+
+        res.status(201).json({ category: result.rows[0] });
+      } catch (err: any) {
+        console.error("/api/vendor-categories POST error", err);
+        if (err.code === "23505") {
+          // Unique constraint violation
+          res.status(409).json({ message: "Vendor category already exists" });
+        } else {
+          res.status(500).json({ message: "failed to create vendor category" });
+        }
+      }
+    },
+  );
+
+  // PUT /api/vendor-categories/:id - Update a vendor category
+  app.put(
+    "/api/vendor-categories/:id",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const id = req.params.id;
+        const { name, description } = req.body;
+
+        const fields: string[] = [];
+        const vals: any[] = [];
+        let idx = 1;
+
+        if (name !== undefined && name.trim()) {
+          fields.push(`name = $${idx++}`);
+          vals.push(name.trim());
+        }
+
+        if (description !== undefined) {
+          fields.push(`description = $${idx++}`);
+          vals.push(description);
+        }
+
+        if (fields.length === 0) {
+          res.status(400).json({ message: "No fields to update" });
+          return;
+        }
+
+        fields.push(`updated_at = $${idx++}`);
+        vals.push(new Date());
+        vals.push(id);
+
+        const q = `UPDATE vendor_categories SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`;
+        const result = await query(q, vals);
+
+        if (result.rows.length === 0) {
+          res.status(404).json({ message: "Vendor category not found" });
+          return;
+        }
+
+        res.json({ category: result.rows[0] });
+      } catch (err: any) {
+        console.error("/api/vendor-categories PUT error", err);
+        if (err.code === "23505") {
+          res.status(409).json({ message: "Vendor category name already exists" });
+        } else {
+          res.status(500).json({ message: "failed to update vendor category" });
+        }
+      }
+    },
+  );
+
+  // DELETE /api/vendor-categories/:id - Delete a vendor category
+  app.delete(
+    "/api/vendor-categories/:id",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const id = req.params.id;
+
+        const result = await query(
+          "DELETE FROM vendor_categories WHERE id = $1 RETURNING id",
+          [id],
+        );
+
+        if (result.rowCount === 0) {
+          res.status(404).json({ message: "Vendor category not found" });
+          return;
+        }
+
+        res.json({ message: "Vendor category deleted successfully" });
+      } catch (err: any) {
+        console.error("/api/vendor-categories DELETE error", err);
+        res.status(500).json({ message: "failed to delete vendor category" });
+      }
+    },
+  );
+
   // ====== MATERIAL TEMPLATES ROUTES (Admin/Software Team only) ======
 
   // GET /api/material-templates - List all material templates
@@ -1495,7 +1636,7 @@ export async function registerRoutes(
     requireRole("admin", "software_team", "purchase_team"),
     async (req: Request, res: Response) => {
       try {
-        const { name, code, category, vendorCategory, taxCodeType, taxCodeValue } = req.body;
+        const { name, code, category, subcategory, vendorCategory, taxCodeType, taxCodeValue } = req.body;
 
         if (!name || !name.trim()) {
           res.status(400).json({ message: "Template name is required" });
@@ -1509,10 +1650,10 @@ export async function registerRoutes(
 
         const id = randomUUID();
         const result = await query(
-          `INSERT INTO material_templates (id, name, code, category, vendor_category, tax_code_type, tax_code_value, created_at, updated_at) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW()) 
+          `INSERT INTO material_templates (id, name, code, category, subcategory, vendor_category, tax_code_type, tax_code_value, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) 
          RETURNING *`,
-          [id, name.trim(), code.trim(), category || null, vendorCategory || null, taxCodeType || null, taxCodeValue || null],
+          [id, name.trim(), code.trim(), category || null, subcategory || null, vendorCategory || null, taxCodeType || null, taxCodeValue || null],
         );
 
         res.status(201).json({ template: result.rows[0] });
@@ -1534,7 +1675,7 @@ export async function registerRoutes(
         console.log('[PUT /api/material-templates/:id] user:', (req as any).user);
         console.log('[PUT /api/material-templates/:id] params.id:', req.params.id);
         console.log('[PUT /api/material-templates/:id] body:', req.body);
-        const { name, code, category, vendorCategory, taxCodeType, taxCodeValue } = req.body;
+        const { name, code, category, subcategory, vendorCategory, taxCodeType, taxCodeValue, vendor_category, tax_code_type, tax_code_value } = req.body;
 
         // Only update fields that are provided
         const fields: string[] = [];
@@ -1553,17 +1694,21 @@ export async function registerRoutes(
           fields.push(`category = $${idx++}`);
           vals.push(category || null);
         }
-        if (vendorCategory !== undefined) {
+        if (subcategory !== undefined) {
+          fields.push(`subcategory = $${idx++}`);
+          vals.push(subcategory || null);
+        }
+        if (vendorCategory !== undefined || vendor_category !== undefined) {
           fields.push(`vendor_category = $${idx++}`);
-          vals.push(vendorCategory || null);
+          vals.push((vendorCategory !== undefined ? vendorCategory : vendor_category) || null);
         }
-        if (taxCodeType !== undefined) {
+        if (taxCodeType !== undefined || tax_code_type !== undefined) {
           fields.push(`tax_code_type = $${idx++}`);
-          vals.push(taxCodeType || null);
+          vals.push((taxCodeType !== undefined ? taxCodeType : tax_code_type) || null);
         }
-        if (taxCodeValue !== undefined) {
+        if (taxCodeValue !== undefined || tax_code_value !== undefined) {
           fields.push(`tax_code_value = $${idx++}`);
-          vals.push(taxCodeValue || null);
+          vals.push((taxCodeValue !== undefined ? taxCodeValue : tax_code_value) || null);
         }
 
         if (fields.length === 0) {
@@ -2883,116 +3028,6 @@ export async function registerRoutes(
     },
   );
 
-  // POST /api/boq-versions/:versionId/save-edits - Save edited fields for BOQ items in a version
-  app.post(
-    "/api/boq-versions/:versionId/save-edits",
-    authMiddleware,
-    async (req: Request, res: Response) => {
-      try {
-        const { versionId } = req.params;
-        const { editedFields } = req.body;
-
-        if (!editedFields || typeof editedFields !== 'object') {
-          res.status(400).json({ message: "editedFields object is required" });
-          return;
-        }
-
-        console.log(`[save-edits] Saving edits for version ${versionId}`, {
-          editCount: Object.keys(editedFields).length,
-          editKeys: Object.keys(editedFields),
-          sample: Object.keys(editedFields).length > 0 ? editedFields[Object.keys(editedFields)[0]] : null
-        });
-
-        // editedFields structure: { "itemId-itemIdx": { field: value, ... }, ... }
-        // We need to get all BOQ items for this version and update their table_data
-
-        // Get all BOQ items for this version
-        const itemsResult = await query(
-          `SELECT id, table_data FROM boq_items WHERE version_id = $1`,
-          [versionId]
-        );
-
-        if (itemsResult.rows.length === 0) {
-          console.log(`[save-edits] No BOQ items found for version ${versionId}`);
-          res.status(404).json({ message: "No BOQ items found for this version" });
-          return;
-        }
-
-        console.log(`[save-edits] Found ${itemsResult.rows.length} BOQ items for version ${versionId}`);
-
-        let totalUpdated = 0;
-
-        // Process each BOQ item and apply edits
-        for (const row of itemsResult.rows) {
-          const itemId = row.id;
-          const tableData = typeof row.table_data === 'string'
-            ? JSON.parse(row.table_data)
-            : row.table_data;
-
-          console.log(`[save-edits] Processing item ${itemId}`, {
-            hasStep11Items: !!tableData.step11_items,
-            step11ItemsCount: tableData.step11_items?.length || 0
-          });
-
-          if (!tableData.step11_items || !Array.isArray(tableData.step11_items)) {
-            console.log(`[save-edits] Skipping item ${itemId} - no step11_items array`);
-            continue;
-          }
-
-          let hasChanges = false;
-
-          // Apply edits to step11_items
-          tableData.step11_items.forEach((step11Item: any, itemIdx: number) => {
-            const itemKey = `${itemId}-${itemIdx}`;
-            const editsForThisItem = editedFields[itemKey];
-
-            if (editsForThisItem) {
-              console.log(`[save-edits] Applying edits for ${itemKey}:`, {
-                edits: editsForThisItem,
-                originalValues: {
-                  qty: step11Item.qty,
-                  supply_rate: step11Item.supply_rate,
-                  install_rate: step11Item.install_rate
-                }
-              });
-
-              // Apply each edited field
-              Object.keys(editsForThisItem).forEach(fieldName => {
-                const oldValue = step11Item[fieldName];
-                const newValue = editsForThisItem[fieldName];
-                step11Item[fieldName] = newValue;
-                hasChanges = true;
-                console.log(`[save-edits]   Field '${fieldName}': ${oldValue} → ${newValue}`);
-              });
-            }
-          });
-
-          // Update the database if this item has changes
-          if (hasChanges) {
-            await query(
-              `UPDATE boq_items SET table_data = $1 WHERE id = $2`,
-              [JSON.stringify(tableData), itemId]
-            );
-            totalUpdated++;
-            console.log(`[save-edits] ✅ Updated BOQ item ${itemId} in database`);
-          } else {
-            console.log(`[save-edits] ⏭️  No changes for item ${itemId}`);
-          }
-        }
-
-        console.log(`[save-edits] Completed: ${totalUpdated} items updated`);
-        res.json({
-          message: "Edits saved successfully",
-          itemsUpdated: totalUpdated
-        });
-      } catch (err) {
-        console.error("POST /api/boq-versions/:versionId/save-edits error", err);
-        res.status(500).json({ message: "Failed to save edits" });
-      }
-    }
-  );
-
-
   // DELETE /api/boq-versions/:versionId - Delete a version and its items
   app.delete(
     "/api/boq-versions/:versionId",
@@ -3761,6 +3796,176 @@ export async function registerRoutes(
       } catch (err) {
         console.error("DELETE /api/estimator-step12-qa-selection error", err);
         res.status(500).json({ message: "Failed to delete step 12 QA items" });
+      }
+    },
+  );
+
+  // ====== STEP 11 PRODUCT CONFIGURATION ROUTES ======
+
+  // POST /api/step11-products - Save product configuration
+  app.post(
+    "/api/step11-products",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      console.log("[POST /api/step11-products] body:", JSON.stringify(req.body).slice(0, 200) + "...");
+      try {
+        const {
+          productId,
+          productName,
+          configName,
+          categoryId,
+          subcategoryId,
+          totalCost,
+          items,
+        } = req.body;
+
+        if (!productId) {
+          console.warn("[POST /api/step11-products] Missing productId");
+          res.status(400).json({ message: "Product ID is required" });
+          return;
+        }
+
+        // Start transaction
+        await query("BEGIN");
+
+        try {
+          // 1. Optional: Delete existing configuration if we specifically want to overwrite by config_name?
+          // For now, let's just allow multiple. If config_name is provided, we could overwrite it.
+
+          if (configName) {
+            console.log(`[POST /api/step11-products] Checking for existing config named "${configName}" for productId: ${productId}`);
+            await query("DELETE FROM step11_products WHERE product_id = $1 AND config_name = $2", [
+              productId,
+              configName,
+            ]);
+          }
+
+          // 2. Insert into step11_products
+          console.log(`[POST /api/step11-products] Inserting new product config for productId: ${productId}`);
+          const productResult = await query(
+            `INSERT INTO step11_products (product_id, product_name, config_name, category_id, subcategory_id, total_cost, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+             RETURNING id`,
+            [productId, productName, configName || 'Default Configuration', categoryId, subcategoryId, totalCost],
+          );
+
+          const step11ProductId = productResult.rows[0].id;
+          console.log(`[POST /api/step11-products] Inserted step11_products with internal ID: ${step11ProductId}`);
+
+          // 3. Insert items
+          if (items && Array.isArray(items)) {
+            console.log(`[POST /api/step11-products] Inserting ${items.length} items`);
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              console.log(`[POST /api/step11-products] Inserting item ${i + 1}/${items.length}:`, JSON.stringify(item));
+              await query(
+                `INSERT INTO step11_product_items 
+                 (step11_product_id, material_id, material_name, unit, qty, rate, supply_rate, install_rate, location, amount)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                [
+                  step11ProductId,
+                  item.materialId,
+                  item.materialName,
+                  item.unit,
+                  item.qty,
+                  item.rate,
+                  item.supplyRate,
+                  item.installRate,
+                  item.location,
+                  item.amount,
+                ],
+              );
+            }
+          }
+
+          console.log("[POST /api/step11-products] All items inserted. Committing...");
+          await query("COMMIT");
+          console.log("[POST /api/step11-products] Transaction committed. Sending 201 response.");
+          res.status(201).json({ message: "Configuration saved successfully" });
+        } catch (err) {
+          console.error("[POST /api/step11-products] Internal error during transaction:", err);
+          await query("ROLLBACK");
+          throw err;
+        }
+      } catch (err) {
+        console.error("POST /api/step11-products error:", err instanceof Error ? err.message : err);
+        console.error("Full error:", err);
+        res.status(500).json({ message: "Failed to save product configuration", error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // GET /api/step11-products/:productId - Load ALL configurations for this product
+  app.get(
+    "/api/step11-products/:productId",
+    async (req: Request, res: Response) => {
+      const { productId } = req.params;
+      const logMsg = `[${new Date().toISOString()}] GET /api/step11-products/${productId}\n`;
+      fs.appendFileSync('server_api_log.txt', logMsg);
+
+      try {
+        const productResult = await query(
+          "SELECT * FROM step11_products WHERE product_id = $1 ORDER BY updated_at DESC",
+          [productId],
+        );
+
+        const resLog = `  -> Found ${productResult.rows.length} configurations\n`;
+        fs.appendFileSync('server_api_log.txt', resLog);
+
+        // Enhance configurations with their items
+        const enhancedConfigs = await Promise.all(productResult.rows.map(async (p: any) => {
+          const itemsResult = await query(
+            "SELECT * FROM step11_product_items WHERE step11_product_id = $1",
+            [p.id],
+          );
+          return {
+            product: p,
+            items: itemsResult.rows,
+          };
+        }));
+
+        res.json({
+          configurations: enhancedConfigs,
+        });
+      } catch (err) {
+        console.error("GET /api/step11-products/:productId error", err);
+        res.status(500).json({ message: "Failed to load product configurations" });
+      }
+    },
+  );
+
+  // GET /api/step11-products/config/:id - Load specific configuration with items
+  app.get(
+    "/api/step11-products/config/:id",
+    async (req: Request, res: Response) => {
+      const { id } = req.params;
+      console.log("[GET /api/step11-products/config/:id] id:", id);
+      try {
+        const productResult = await query(
+          "SELECT * FROM step11_products WHERE id = $1",
+          [id],
+        );
+
+        if (productResult.rows.length === 0) {
+          res.status(404).json({ message: "Configuration not found" });
+          return;
+        }
+
+        const product = productResult.rows[0];
+
+        const itemsResult = await query(
+          "SELECT * FROM step11_product_items WHERE step11_product_id = $1",
+          [id],
+        );
+
+        res.json({
+          product,
+          items: itemsResult.rows,
+        });
+      } catch (err) {
+        console.error("GET /api/step11-products/config/:id error", err);
+        res.status(500).json({ message: "Failed to load specific configuration" });
       }
     },
   );

@@ -1,0 +1,28 @@
+// GET /api/step11-snapshots/:productId - Get product BOQ snapshot
+app.get("/api/step11-snapshots/:productId", async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+    
+    const result = await query(
+      "SELECT * FROM product_boq_snapshots WHERE product_id = $1 ORDER BY updated_at DESC LIMIT 1",
+      [productId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "No snapshot found for this product" });
+    }
+
+    const snapshot = result.rows[0];
+    res.json({ 
+      snapshot: {
+        ...snapshot,
+        table_snapshot_json: typeof snapshot.table_snapshot_json === 'string' 
+          ? JSON.parse(snapshot.table_snapshot_json) 
+          : snapshot.table_snapshot_json
+      }
+    });
+  } catch (err) {
+    console.error("/api/step11-snapshots/:productId GET error", err);
+    res.status(500).json({ message: "Failed to fetch product snapshot" });
+  }
+});

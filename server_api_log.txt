@@ -1,0 +1,6 @@
+[2026-02-16T11:25:58.888Z] GET /api/step11-products/43dabf84-d7db-4bf6-ac94-fc025de559be
+  -> Found 4 configurations
+[2026-02-16T11:36:04.300Z] GET /api/step11-products/43dabf84-d7db-4bf6-ac94-fc025de559be
+  -> Found 4 configurations
+[2026-02-16T11:36:34.077Z] GET /api/step11-products/a220e292-cc61-4f8f-988a-8a3287b386b2
+  -> Found 2 configurations

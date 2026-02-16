@@ -71,6 +71,16 @@ export default function ManageMaterials() {
   const [submitting, setSubmitting] = useState(false);
 
   const [entriesList, setEntriesList] = useState<any[]>([]);
+  
+  // Rate loading state
+  const [rateMessage, setRateMessage] = useState<{
+    type: "success" | "info" | "none";
+    text: string;
+  }>({ type: "none", text: "" });
+  const [loadingRate, setLoadingRate] = useState(false);
+
+  // Edit entry state
+  const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
 
   const [formData, setFormData] = useState({
     rate: "",
@@ -210,58 +220,59 @@ export default function ManageMaterials() {
     }, 100);
   };
 
-  // When both shop and template are selected, try to prefill form from existing approved materials
+  // When both shop and template are selected, automatically fetch the existing rate
   useEffect(() => {
-    const tryPrefill = async () => {
-      if (!selectedTemplate || !selectedShop) return;
+    const fetchRate = async () => {
+      if (!selectedTemplate || !selectedShop) {
+        setRateMessage({ type: "none", text: "" });
+        return;
+      }
+
+      setLoadingRate(true);
       try {
-        // Fetch from approved materials table only
-        const res = await fetch('/api/materials');
-        if (!res.ok) {
-          console.warn('[ManageMaterials] Failed to fetch materials');
+        const response = await fetch(
+          `/api/material-rate?template_id=${encodeURIComponent(selectedTemplate.id)}&shop_id=${encodeURIComponent(selectedShop)}`
+        );
+        
+        if (!response.ok) {
+          console.warn('[ManageMaterials] Failed to fetch material rate');
+          setRateMessage({ type: "none", text: "" });
+          setLoadingRate(false);
           return;
         }
-        
-        const data = await res.json();
-        const materials = data.materials || [];
-        console.log('[ManageMaterials] Fetched approved materials:', materials.length);
-        console.log('[ManageMaterials] Looking for template:', selectedTemplate.id, 'shop:', selectedShop);
-        
-        // Find material by template_id and shop_id
-        const found = materials.find((m: any) => {
-          const templateMatch = String(m.template_id) === String(selectedTemplate.id);
-          const shopMatch = String(m.shop_id) === String(selectedShop);
-          if (templateMatch && shopMatch) {
-            console.log('[ManageMaterials] MATCH FOUND:', m);
-          }
-          return templateMatch && shopMatch;
-        });
-        
-        console.log('[ManageMaterials] Found record:', found);
-        
-        if (found) {
+
+        const data = await response.json();
+        console.log('[ManageMaterials] Rate fetch result:', data);
+
+        if (data.found && data.material) {
           // Prefill form fields with the existing material's values
-          setFormData(() => ({
-            rate: found.rate != null ? String(found.rate) : "",
-            unit: found.unit || "",
-            brandname: found.brandname || "",
-            modelnumber: found.modelnumber || "",
-            category: found.category || "",
-            subcategory: found.subcategory || "",
-            product: found.product || "",
-            technicalspecification: found.technicalspecification || "",
-            dimensions: found.dimensions || "",
-            finishtype: found.finishtype || "",
-            metaltype: found.metaltype || "",
+          setFormData((prev) => ({
+            ...prev,
+            rate: data.material.rate != null ? String(data.material.rate) : "",
+            unit: data.material.unit || prev.unit || "",
+            brandname: data.material.brandname || "",
+            modelnumber: data.material.modelnumber || "",
+            category: data.material.category || prev.category || "",
+            subcategory: data.material.subcategory || "",
+            product: data.material.product || "",
+            technicalspecification: data.material.technicalspecification || "",
+            dimensions: data.material.dimensions || "",
+            finishtype: data.material.finishtype || "",
+            metaltype: data.material.metaltype || "",
           }));
-          console.log('[ManageMaterials] Form prefilled successfully');
-          
-          // if category present, ensure subcategories loaded
-          if (found.category) {
-            await loadSubcategories(found.category);
+
+          // Load subcategories if category is present
+          if (data.material.category) {
+            await loadSubcategories(data.material.category);
           }
+
+          // Show success message
+          setRateMessage({
+            type: "success",
+            text: `✓ Existing Rate Loaded (${data.source === "approved" ? "Approved" : "Pending"})`,
+          });
         } else {
-          // No material found for this shop+template: clear shop-specific fields
+          // No rate found: clear rate field but keep other template-specific data
           setFormData((prev) => ({
             ...prev,
             rate: "",
@@ -275,14 +286,21 @@ export default function ManageMaterials() {
             finishtype: "",
             metaltype: "",
           }));
-          console.log('[ManageMaterials] No record found, fields cleared');
+
+          setRateMessage({
+            type: "info",
+            text: "No rate found for this shop - enter a new rate",
+          });
         }
       } catch (err) {
-        console.warn('[ManageMaterials] Prefill error:', err);
+        console.warn('[ManageMaterials] Rate fetch error:', err);
+        setRateMessage({ type: "none", text: "" });
+      } finally {
+        setLoadingRate(false);
       }
     };
 
-    tryPrefill();
+    fetchRate();
   }, [selectedShop, selectedTemplate]);
 
   const handleSubmitMaterial = async (e: React.FormEvent) => {
@@ -422,6 +440,106 @@ export default function ManageMaterials() {
     setEntriesList((s) => s.filter((_, i) => i !== index));
   };
 
+  const handleEditEntry = (index: number) => {
+    const entry = entriesList[index];
+    setEditingEntryIndex(index);
+    
+    // Set the shop for this entry
+    setSelectedShop(entry.shop_id || "");
+    
+    // Populate form with entry data
+    setFormData({
+      rate: entry.rate || "",
+      unit: entry.unit || "",
+      brandname: entry.brandname || "",
+      modelnumber: entry.modelnumber || "",
+      category: entry.category || "",
+      subcategory: entry.subcategory || "",
+      product: entry.product || "",
+      technicalspecification: entry.technicalspecification || "",
+      dimensions: entry.dimensions || "",
+      finishtype: entry.finishtype || "",
+      metaltype: entry.metaltype || "",
+    });
+
+    // Load subcategories if category exists
+    if (entry.category) {
+      loadSubcategories(entry.category);
+    }
+
+    // Scroll to form
+    setTimeout(() => {
+      const formElement = document.getElementById("material-form");
+      if (formElement) {
+        formElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  };
+
+  const handleUpdateEntry = () => {
+    if (editingEntryIndex === null) return;
+
+    if (!formData.rate || !formData.unit || !formData.category) {
+      toast({
+        title: "Error",
+        description: "Rate, unit, and category are required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const updatedEntry = {
+      template_id: selectedTemplate?.id || entriesList[editingEntryIndex].template_id,
+      shop_id: selectedShop || entriesList[editingEntryIndex].shop_id,
+      ...formData,
+    };
+
+    setEntriesList((prev) => 
+      prev.map((entry, index) => 
+        index === editingEntryIndex ? updatedEntry : entry
+      )
+    );
+
+    // Clear form and editing state
+    setFormData({
+      rate: "",
+      unit: "",
+      brandname: "",
+      modelnumber: "",
+      category: selectedTemplate?.category || "",
+      subcategory: "",
+      product: "",
+      technicalspecification: "",
+      dimensions: "",
+      finishtype: "",
+      metaltype: "",
+    });
+    setEditingEntryIndex(null);
+
+    toast({
+      title: "Entry Updated",
+      description: "Item updated in the submission list.",
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEntryIndex(null);
+    setSelectedShop(""); // Reset shop selection
+    setFormData({
+      rate: "",
+      unit: "",
+      brandname: "",
+      modelnumber: "",
+      category: selectedTemplate?.category || "",
+      subcategory: "",
+      product: "",
+      technicalspecification: "",
+      dimensions: "",
+      finishtype: "",
+      metaltype: "",
+    });
+  };
+
   return (
     <Layout>
       <div className="container mx-auto py-8">
@@ -498,9 +616,14 @@ export default function ManageMaterials() {
           {selectedTemplate && (
             <Card id="material-form" className="scroll-mt-20 border-blue-200 shadow-sm">
               <CardHeader className="py-3 bg-blue-50/50">
-                <CardTitle className="text-base">Submit Material Details</CardTitle>
+                <CardTitle className="text-base">
+                  {editingEntryIndex !== null ? "Edit Material Details" : "Submit Material Details"}
+                </CardTitle>
                 <CardDescription className="text-xs mt-1">
-                  Editing: {selectedTemplate.name} ({selectedTemplate.code})
+                  {editingEntryIndex !== null 
+                    ? `Editing item ${editingEntryIndex + 1} from submission queue`
+                    : `Editing: ${selectedTemplate.name} (${selectedTemplate.code})`
+                  }
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-6">
@@ -522,13 +645,23 @@ export default function ManageMaterials() {
 
                     <div>
                       <Label>Rate <Required /></Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={formData.rate}
-                        onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
-                      />
+                      <div className="flex gap-2 items-center">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={formData.rate}
+                          onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
+                          disabled={loadingRate}
+                        />
+                        {loadingRate && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                      </div>
+                      {rateMessage.type === "success" && (
+                        <p className="text-sm text-green-600 mt-1 font-medium">{rateMessage.text}</p>
+                      )}
+                      {rateMessage.type === "info" && (
+                        <p className="text-sm text-amber-600 mt-1">{rateMessage.text}</p>
+                      )}
                     </div>
                   </div>
 
@@ -651,13 +784,34 @@ export default function ManageMaterials() {
                       <div className="max-h-48 overflow-y-auto divide-y">
                         {entriesList.map((entry, idx) => (
                           <div key={idx} className="flex items-center justify-between px-4 py-3 bg-white">
-                            <div className="text-xs">
+                            <div className="text-xs flex-1">
                               <div className="font-bold text-slate-700">Rate: {entry.rate} / {entry.unit}</div>
-                              <div className="text-slate-500">{entry.brandname || 'No Brand'} • {entry.category}</div>
+                              <div className="text-slate-500">
+                                {entry.brandname || 'No Brand'} • {entry.category}
+                                {entry.subcategory && ` • ${entry.subcategory}`}
+                                {entry.product && ` • ${entry.product}`}
+                              </div>
+                              {entry.technicalspecification && (
+                                <div className="text-slate-400 mt-1 truncate max-w-xs">
+                                  {entry.technicalspecification}
+                                </div>
+                              )}
                             </div>
-                            <Button type="button" size="sm" variant="ghost" className="text-red-500 h-8 hover:bg-red-50" onClick={() => handleRemoveEntry(idx)}>
-                              Remove
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button 
+                                type="button" 
+                                size="sm" 
+                                variant="outline" 
+                                className="h-8 text-blue-600 hover:bg-blue-50"
+                                onClick={() => handleEditEntry(idx)}
+                                disabled={editingEntryIndex !== null}
+                              >
+                                Edit
+                              </Button>
+                              <Button type="button" size="sm" variant="ghost" className="text-red-500 h-8 hover:bg-red-50" onClick={() => handleRemoveEntry(idx)}>
+                                Remove
+                              </Button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -665,14 +819,44 @@ export default function ManageMaterials() {
                   )}
 
                   <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
-                    <Button type="button" onClick={handleAddEntry} variant="outline" className="flex-1 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
-                      <Plus className="w-4 h-4" /> Add to List
-                    </Button>
-                    <Button type="submit" disabled={submitting} className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700">
-                      {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                      {entriesList.length > 0 ? `Submit ${entriesList.length} Items` : "Submit Single Item"}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={() => setSelectedTemplate(null)}>Cancel</Button>
+                    {editingEntryIndex !== null ? (
+                      <>
+                        <Button type="button" onClick={handleUpdateEntry} className="flex-1 gap-2 bg-green-600 hover:bg-green-700">
+                          Update Entry
+                        </Button>
+                        <Button type="button" onClick={handleCancelEdit} variant="outline" className="flex-1">
+                          Cancel Edit
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button type="button" onClick={handleAddEntry} variant="outline" className="flex-1 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50">
+                          <Plus className="w-4 h-4" /> Add to List
+                        </Button>
+                        <Button type="submit" disabled={submitting} className="flex-1 gap-2 bg-blue-600 hover:bg-blue-700">
+                          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                          {entriesList.length > 0 ? `Submit ${entriesList.length} Items` : "Submit Single Item"}
+                        </Button>
+                      </>
+                    )}
+                    <Button type="button" variant="ghost" onClick={() => {
+                      setSelectedTemplate(null);
+                      setEditingEntryIndex(null);
+                      setSelectedShop("");
+                      setFormData({
+                        rate: "",
+                        unit: "",
+                        brandname: "",
+                        modelnumber: "",
+                        category: "",
+                        subcategory: "",
+                        product: "",
+                        technicalspecification: "",
+                        dimensions: "",
+                        finishtype: "",
+                        metaltype: "",
+                      });
+                    }}>Cancel</Button>
                   </div>
                 </form>
               </CardContent>

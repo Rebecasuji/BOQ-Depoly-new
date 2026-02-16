@@ -152,3 +152,38 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type EstimatorStep9Cart = typeof estimatorStep9Cart.$inferSelect;
 export type InsertEstimatorStep9Cart = z.infer<typeof insertEstimatorStep9CartSchema>;
+
+export const step11Products = pgTable("step11_products", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  productId: uuid("product_id").notNull(),
+  productName: text("product_name").notNull(),
+  categoryId: text("category_id"),
+  subcategoryId: text("subcategory_id"),
+  totalCost: decimal("total_cost", { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).default(sql`now()`),
+});
+
+export const step11ProductItems = pgTable("step11_product_items", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  step11ProductId: uuid("step11_product_id")
+    .notNull()
+    .references(() => step11Products.id),
+  materialId: uuid("material_id").notNull(),
+  materialName: text("material_name").notNull(),
+  unit: text("unit"),
+  qty: decimal("qty", { precision: 10, scale: 2 }),
+  rate: decimal("rate", { precision: 15, scale: 2 }),
+  supplyRate: decimal("supply_rate", { precision: 15, scale: 2 }),
+  installRate: decimal("install_rate", { precision: 15, scale: 2 }),
+  location: text("location"),
+  amount: decimal("amount", { precision: 15, scale: 2 }),
+});
+
+export const insertStep11ProductSchema = createInsertSchema(step11Products);
+export const insertStep11ProductItemSchema = createInsertSchema(step11ProductItems);
+
+export type Step11Product = typeof step11Products.$inferSelect;
+export type InsertStep11Product = z.infer<typeof insertStep11ProductSchema>;
+export type Step11ProductItem = typeof step11ProductItems.$inferSelect;
+export type InsertStep11ProductItem = z.infer<typeof insertStep11ProductItemSchema>;
