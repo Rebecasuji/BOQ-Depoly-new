@@ -3001,6 +3001,130 @@ export async function registerRoutes(
     },
   );
 
+  // POST /api/boq-versions/:versionId/save-edits - Batch save edits for BOQ items in a version
+  app.post(
+    "/api/boq-versions/:versionId/save-edits",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { versionId } = req.params;
+        const { editedFields } = req.body;
+
+        if (!editedFields || Object.keys(editedFields).length === 0) {
+          return res.json({ message: "No edits to save" });
+        }
+
+        console.log(`Saving edits for version ${versionId}:`, Object.keys(editedFields));
+
+        // Group edits by boqItemId
+        const editsByItem: Record<string, Record<number, any>> = {};
+        for (const [key, fields] of Object.entries(editedFields)) {
+          const lastDashIndex = key.lastIndexOf("-");
+          if (lastDashIndex === -1) {
+            console.warn(`[save-edits] Invalid edit key format: ${key}`);
+            continue;
+          }
+          const boqItemId = key.substring(0, lastDashIndex).trim();
+          const itemIdxStr = key.substring(lastDashIndex + 1);
+          const itemIdx = parseInt(itemIdxStr, 10);
+
+          if (!editsByItem[boqItemId]) editsByItem[boqItemId] = {};
+          editsByItem[boqItemId][itemIdx] = fields;
+        }
+
+        console.log("Grouped edits by BOQ Item ID:", Object.keys(editsByItem));
+
+        // Process each BOQ item that has edits
+        let totalItemsUpdated = 0;
+        const updatedRows: any[] = [];
+
+        for (const [boqItemId, itemEdits] of Object.entries(editsByItem)) {
+          console.log(`Processing edits for BOQ Item ID: ${boqItemId}`);
+
+          // Fetch existing item
+          const result = await query(
+            `SELECT table_data FROM boq_items WHERE id = $1`,
+            [boqItemId]
+          );
+
+          if (result.rows.length === 0) {
+            console.warn(`BOQ item ${boqItemId} NOT FOUND in version ${versionId}`);
+            continue;
+          }
+
+          let tableData = result.rows[0].table_data;
+          if (typeof tableData === "string") {
+            try {
+              tableData = JSON.parse(tableData);
+            } catch (e) {
+              console.error(`Failed to parse table_data string for item ${boqItemId}`, e);
+              continue;
+            }
+          }
+
+          if (!tableData || !tableData.step11_items || !Array.isArray(tableData.step11_items)) {
+            console.warn(`BOQ item ${boqItemId} has no valid step11_items array`, tableData);
+            continue;
+          }
+
+          // Apply edits to step11_items array
+          let editsAppliedToThisItem = 0;
+          for (const [itemIdxStr, fields] of Object.entries(itemEdits)) {
+            const itemIdx = parseInt(itemIdxStr, 10);
+            if (tableData.step11_items[itemIdx]) {
+              console.log(`Applying edits to sub-item index ${itemIdx} of BOQ Item ${boqItemId}`);
+              tableData.step11_items[itemIdx] = {
+                ...tableData.step11_items[itemIdx],
+                ...fields as any
+              };
+              editsAppliedToThisItem++;
+            } else {
+              console.warn(`Sub-item index ${itemIdx} NOT FOUND in step11_items of BOQ Item ${boqItemId}`);
+            }
+          }
+
+          if (editsAppliedToThisItem > 0) {
+            // Update DB with modified table_data object directly
+            const updateResult = await query(
+              `UPDATE boq_items SET table_data = $1 WHERE id = $2`,
+              [tableData, boqItemId]
+            );
+            console.log(`[save-edits] DB UPDATE SUCCESS for ${boqItemId}. Rows affected: ${updateResult.rowCount}`);
+
+            // Fetch the updated row so we can return authoritative data to the client
+            try {
+              const fresh = await query(
+                `SELECT id, project_id, version_id, estimator, table_data, created_at FROM boq_items WHERE id = $1`,
+                [boqItemId],
+              );
+              if (fresh.rows.length > 0) {
+                const row = fresh.rows[0];
+                updatedRows.push({
+                  id: row.id,
+                  project_id: row.project_id,
+                  version_id: row.version_id,
+                  estimator: row.estimator,
+                  table_data: typeof row.table_data === "string" ? JSON.parse(row.table_data) : row.table_data,
+                  created_at: row.created_at,
+                });
+              }
+            } catch (e) {
+              console.warn(`[save-edits] Failed to re-select updated row ${boqItemId}:`, e);
+            }
+
+            totalItemsUpdated++;
+          }
+        }
+
+        console.log(`Successfully finished saving edits. Total BOQ items updated: ${totalItemsUpdated}`);
+        res.json({ message: "Edits saved successfully", updatedItems: updatedRows });
+      } catch (err) {
+        console.error("POST /api/boq-versions/:versionId/save-edits error", err);
+        res.status(500).json({ message: "Failed to save edits" });
+      }
+    },
+  );
+
   // PUT /api/boq-versions/:versionId - Update version status (lock/submit)
   app.put(
     "/api/boq-versions/:versionId",

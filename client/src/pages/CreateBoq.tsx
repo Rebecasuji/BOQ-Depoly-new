@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Layout } from "@/components/layout/Layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -106,6 +106,11 @@ export default function CreateBoq() {
       install_rate?: number;
     };
   }>({});
+  // Keep a ref in sync to avoid state-update races when user types and clicks Save quickly.
+  const editedFieldsRef = useRef(editedFields);
+  useEffect(() => {
+    editedFieldsRef.current = editedFields;
+  }, [editedFields]);
 
   // Load projects from DB on mount
   useEffect(() => {
@@ -181,6 +186,7 @@ export default function CreateBoq() {
     if (!selectedVersionId) {
       setBoqItems([]);
       setEditedFields({});
+      editedFieldsRef.current = {};
       return;
     }
 
@@ -561,13 +567,18 @@ export default function CreateBoq() {
   };
 
   const updateEditedField = (itemKey: string, field: string, value: any) => {
-    setEditedFields((prev) => ({
-      ...prev,
-      [itemKey]: {
-        ...prev[itemKey],
-        [field]: value,
-      },
-    }));
+    setEditedFields((prev) => {
+      const next = {
+        ...prev,
+        [itemKey]: {
+          ...prev[itemKey],
+          [field]: value,
+        },
+      };
+      // keep ref in sync immediately to avoid races when Save is clicked right away
+      editedFieldsRef.current = next;
+      return next;
+    });
   };
 
   const getEditedValue = (
@@ -584,35 +595,91 @@ export default function CreateBoq() {
 
   const handleSaveProject = async () => {
     if (!selectedVersionId) return;
+    console.log("[CreateBoq] handleSaveProject START. editedFields (ref snapshot):", JSON.stringify(editedFieldsRef.current));
+
     try {
-      // Permanently save the current edited fields to the database
+      // Permanently save the current edited fields to the database (use ref to avoid race)
+      const payload = editedFieldsRef.current || {};
       const response = await apiFetch(
         `/api/boq-versions/${encodeURIComponent(selectedVersionId)}/save-edits`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ editedFields }),
+          body: JSON.stringify({ editedFields: payload }),
         },
       );
 
-      if (response.ok) {
-        // Clear edited fields since they're now saved in the database
-        setEditedFields({});
+      console.log("[CreateBoq] Save API response status:", response.status);
 
-        // Reload BOQ items to show the saved edits
+      if (response.ok) {
+        // Prefer authoritative data from server when available (server will return
+        // `updatedItems`). If not present, fall back to optimistic merge + reload.
+        let saveResp: any = null;
         try {
-          const loadResponse = await apiFetch(
-            `/api/boq-items/version/${encodeURIComponent(selectedVersionId)}`,
-            { headers: {} },
+          saveResp = await response.json();
+        } catch (e) {
+          // ignore non-JSON
+        }
+
+        if (saveResp?.updatedItems && saveResp.updatedItems.length > 0) {
+          // Merge server-returned items into local state
+          setBoqItems((prev) => {
+            const byId = new Map(prev.map((i) => [i.id, i]));
+            for (const up of saveResp.updatedItems) {
+              const td = typeof up.table_data === "string" ? JSON.parse(up.table_data) : up.table_data;
+              const existing = byId.get(up.id) || {};
+              byId.set(up.id, { ...existing, ...up, table_data: td });
+            }
+            return prev.map((p) => (byId.has(p.id) ? byId.get(p.id) : p));
+          });
+          setEditedFields({});
+          editedFieldsRef.current = {};
+        } else {
+          // Optimistic merge (UI stays consistent immediately)
+          setBoqItems((prev) =>
+            prev.map((item) => {
+              const keys = Object.keys(editedFields).filter((k) => k.startsWith(`${item.id}-`));
+              if (keys.length === 0) return item;
+
+              const tableData =
+                typeof item.table_data === "string"
+                  ? JSON.parse(item.table_data)
+                  : { ...(item.table_data || {}) };
+              const step11_items = Array.isArray(tableData.step11_items)
+                ? [...tableData.step11_items]
+                : [];
+
+              for (const key of keys) {
+                const idxStr = key.substring(key.lastIndexOf("-") + 1);
+                const idx = parseInt(idxStr, 10);
+                const fields = editedFields[key] || {};
+                if (step11_items[idx]) {
+                  step11_items[idx] = { ...step11_items[idx], ...fields };
+                }
+              }
+
+              return { ...item, table_data: { ...tableData, step11_items } };
+            }),
           );
-          if (loadResponse.ok) {
-            const data = await loadResponse.json();
-            setBoqItems(data.items || []);
-            console.log("BOQ items reloaded after save:", data.items?.length || 0);
+
+          // Try to reload authoritative state from server. If reload fails we keep optimistic state.
+          try {
+            const loadResponse = await apiFetch(
+              `/api/boq-items/version/${encodeURIComponent(selectedVersionId)}`,
+              { headers: {} },
+            );
+
+            if (loadResponse.ok) {
+              const data = await loadResponse.json();
+              setBoqItems(data.items || []);
+              setEditedFields({});
+              editedFieldsRef.current = {};
+            } else {
+              console.warn("[CreateBoq] Failed to reload BOQ items after save; keeping optimistic local state");
+            }
+          } catch (loadErr) {
+            console.error("[CreateBoq] Failed to reload BOQ items after save:", loadErr);
           }
-        } catch (loadErr) {
-          console.error("Failed to reload BOQ items after save:", loadErr);
-          // Non-fatal - the save succeeded, just the reload failed
         }
 
         toast({
@@ -620,7 +687,8 @@ export default function CreateBoq() {
           description: "Draft saved",
         });
       } else {
-        throw new Error("Failed to save edits");
+        const errText = await response.text().catch(() => null);
+        throw new Error("Failed to save edits" + (errText ? `: ${errText}` : ""));
       }
     } catch (err) {
       console.error("Failed to save project:", err);
@@ -1601,7 +1669,7 @@ export default function CreateBoq() {
                 <Button
                   onClick={handleSaveProject}
                   variant="outline"
-                  disabled={isVersionSubmitted}
+                  disabled={isVersionSubmitted || Object.keys(editedFields).length === 0}
                 >
                   Save Draft
                 </Button>
