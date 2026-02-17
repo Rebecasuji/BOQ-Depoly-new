@@ -4,10 +4,10 @@ import { useAuth } from "./auth-context";
 
 export type Role = "admin" | "supplier" | "user" | "purchase_team" | "software_team" | "pre_sales" | "contractor";
 
-export interface User { 
-  id: string; 
+export interface User {
+  id: string;
   username: string;
-  role: Role; 
+  role: Role;
   approved?: string;
   approvalReason?: string;
   fullName?: string;
@@ -21,8 +21,8 @@ export interface User {
   updatedAt?: string;
   shopId?: string;
   // Legacy fields for backward compatibility
-  name?: string; 
-  email?: string; 
+  name?: string;
+  email?: string;
 }
 export interface Shop { id: string; name: string; location?: string; phoneCountryCode?: string; contactNumber?: string; city?: string; state?: string; country?: string; pincode?: string; image?: string; rating?: number; categories?: string[]; gstNo?: string; vendorCategory?: string; ownerId?: string; disabled?: boolean }
 export interface Material { id: string; name: string; code: string; rate: number; shopId?: string; unit?: string; category?: string; brandName?: string; modelNumber?: string; subCategory?: string; product?: string; technicalSpecification?: string; dimensions?: string; finish?: string; metalType?: string; image?: string; attributes?: any; masterMaterialId?: string; disabled?: boolean; vendorCategory?: string; taxCodeType?: 'hsn' | 'sac'; taxCodeValue?: string; }
@@ -47,11 +47,12 @@ interface DataContextType {
   deleteShop: (id: string) => Promise<void>;
   deleteMaterial: (id: string) => Promise<void>;
   approveShop?: (id: string) => Promise<any>;
-  rejectShop?: (id: string, reason?: string|null) => Promise<any>;
-  approveMaterial?: (id: string) => Promise<any>;
-  rejectMaterial?: (id: string, reason?: string|null) => Promise<any>;
+  rejectShop?: (id: string, reason?: string | null) => Promise<any>;
+  approveMaterial?: (id: string, source?: string) => Promise<any>;
+  rejectMaterial?: (id: string, reason?: string | null, source?: string) => Promise<any>;
   addSupportMessage?: (senderName: string, message: string, info?: string) => Promise<void>;
   deleteMessage?: (id: string) => Promise<void>;
+  supplierSubmissions?: any[];
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -59,7 +60,7 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 export function DataProvider({ children }: { children: ReactNode }) {
   // Get auth user and sync it with data store user
   const authContext = useAuth();
-  
+
   const [user, setUser] = useState<User | null>(null);
   const [shops, setShops] = useState<Shop[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -73,6 +74,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     try { return JSON.parse(localStorage.getItem('pendingMaterialRequests') || '[]'); } catch { return []; }
   });
   const [materialApprovalRequests, setMaterialApprovalRequests] = useState<any[]>([]);
+  const [supplierSubmissions, setSupplierSubmissions] = useState<any[]>([]);
   const [flushAttemptCount, setFlushAttemptCount] = useState(0);
   const [lastFlushTime, setLastFlushTime] = useState(0);
 
@@ -108,21 +110,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
   } as Material);
 
   useEffect(() => {
-    let mounted = true;                                                     
+    let mounted = true;
     (async () => {
       try {
         const s = await getJSON('/shops');
-        if (mounted && s?.shops) setShops(s.shops);
+        if (mounted && s?.shops) {
+          setShops(s.shops.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+        }
       } catch (e) { console.warn('load shops failed', e); }
       try {
         const m = await getJSON('/materials');
         if (mounted && m?.materials) {
-          setMaterials(m.materials.map(normalizeMaterial));
+          const normalized = m.materials.map(normalizeMaterial);
+          setMaterials(normalized.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
         }
       } catch (e) { console.warn('load materials failed', e); }
       try {
         const p = await getJSON('/products');
-        if (mounted && p?.products) setProducts(p.products);
+        if (mounted && p?.products) {
+          setProducts(p.products.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+        }
       } catch (e) { console.warn('load products failed', e); }
       // load server-side pending approval lists into central state
       try {
@@ -131,8 +138,45 @@ export function DataProvider({ children }: { children: ReactNode }) {
       } catch (e) { console.warn('load pending shops failed', e); }
       try {
         const pm = await getJSON('/materials-pending-approval');
-        if (mounted && pm?.materials) setMaterialApprovalRequests(pm.materials);
+        if (mounted && pm?.materials) {
+          const transformed = pm.materials.map((r: any) => ({
+            id: r.id,
+            material: r.material || r,
+            status: r.status || 'pending',
+            submittedBy: r.submittedBy || 'Unknown',
+            submittedAt: r.submittedAt || new Date().toISOString(),
+          }));
+          setMaterialApprovalRequests(transformed);
+        }
       } catch (e) { console.warn('load pending materials failed', e); }
+      try {
+        const res = await apiFetch("/material-submissions-pending-approval");
+        if (mounted && res.ok) {
+          const data = await res.json();
+          const submissions = (data.submissions || []).map((s: any) => ({
+            id: s.submission.id,
+            status: "pending",
+            source: 'submission',
+            material: {
+              id: s.submission.id,
+              name: s.submission.template_name || "Supplier Material",
+              code: s.submission.template_code || "",
+              rate: s.submission.rate,
+              unit: s.submission.unit,
+              category: s.submission.category || s.submission.template_category || s.submission.template_category_name || "",
+              subCategory: s.submission.subcategory || s.submission.sub_category || "",
+              brandName: s.submission.brandname || s.submission.brandName || s.submission.brand || s.submission.make || "",
+              modelNumber: s.submission.modelnumber || s.submission.modelNumber || "",
+              technicalSpecification: s.submission.technicalspecification || s.submission.technicalSpecification || "",
+            },
+            submittedBy: s.submission.shop_name || "Supplier",
+            submittedAt: s.submission.created_at,
+            templateId: s.submission.template_id,
+            shopId: s.submission.shop_id,
+          }));
+          setSupplierSubmissions(submissions);
+        }
+      } catch (e) { console.warn("load supplier material submissions failed", e); }
       // load support messages
       try {
         const sm = await getJSON('/messages');
@@ -157,13 +201,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (now - lastFlushTime < 5000 || flushAttemptCount >= 10) {
       return;
     }
-    
+
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('authToken') : null;
     if (!token) return;
-    
+
     setFlushAttemptCount(c => c + 1);
     setLastFlushTime(now);
-    
+
     // try flush shops first
     if (pendingShops.length > 0) {
       const remaining: any[] = [];
@@ -215,7 +259,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // try initial flush on mount when user is present
   useEffect(() => {
     if (user && pendingShops.length + pendingMaterials.length > 0) {
-      flushPendingQueues().catch(() => {});
+      flushPendingQueues().catch(() => { });
     }
   }, [user]);
 
@@ -311,22 +355,62 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return data?.shop;
   };
 
-  const rejectShop = async (id: string, reason?: string|null) => {
+  const rejectShop = async (id: string, reason?: string | null) => {
     const data = await postJSON(`/shops/${id}/reject`, { reason });
     try { const dd = await getJSON('/shops'); if (dd?.shops) setShops(dd.shops); } catch (e) { console.warn('rejectShop refresh failed', e); }
     return data?.shop;
   };
 
-  const approveMaterial = async (id: string) => {
-    const data = await postJSON(`/materials/${id}/approve`, {});
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('approveMaterial refresh failed', e); }
-    return data?.material;
+  const approveMaterial = async (id: string, source?: string) => {
+    let res;
+    if (source === 'submission') {
+      res = await apiFetch(`/material-submissions/${id}/approve`, { method: 'POST' });
+    } else {
+      res = await apiFetch(`/materials/${id}/approve`, { method: 'POST' });
+    }
+
+    if (res.ok) {
+      if (source === 'submission') {
+        setSupplierSubmissions(prev => prev.filter(s => s.id !== id));
+      } else {
+        setMaterialApprovalRequests(prev => prev.filter(r => r.id !== id));
+      }
+      try {
+        const dd = await getJSON('/materials');
+        if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial));
+      } catch (e) { console.warn('approveMaterial refresh failed', e); }
+      return res.json();
+    }
+    throw new Error('Approval failed');
   };
 
-  const rejectMaterial = async (id: string, reason?: string|null) => {
-    const data = await postJSON(`/materials/${id}/reject`, { reason });
-    try { const dd = await getJSON('/materials'); if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial)); } catch (e) { console.warn('rejectMaterial refresh failed', e); }
-    return data?.material;
+  const rejectMaterial = async (id: string, reason?: string | null, source?: string) => {
+    let res;
+    if (source === 'submission') {
+      res = await apiFetch(`/material-submissions/${id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason })
+      });
+    } else {
+      res = await apiFetch(`/materials/${id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason })
+      });
+    }
+
+    if (res.ok) {
+      if (source === 'submission') {
+        setSupplierSubmissions(prev => prev.filter(s => s.id !== id));
+      } else {
+        setMaterialApprovalRequests(prev => prev.filter(r => r.id !== id));
+      }
+      try {
+        const dd = await getJSON('/materials');
+        if (dd?.materials) setMaterials(dd.materials.map(normalizeMaterial));
+      } catch (e) { console.warn('rejectMaterial refresh failed', e); }
+      return res.json();
+    }
+    throw new Error('Rejection failed');
   };
 
   const addSupportMessage = async (senderName: string, message: string, info?: string) => {
@@ -370,7 +454,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     supportMessages,
     pendingShops,
     pendingMaterials,
-    materialApprovalRequests,
+    materialApprovalRequests: [...(materialApprovalRequests || []), ...(supplierSubmissions || [])],
+    supplierSubmissions,
     addShop,
     addMaterial,
     deleteShop,

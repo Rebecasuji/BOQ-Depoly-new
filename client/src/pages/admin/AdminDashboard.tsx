@@ -43,6 +43,7 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
+  Copy,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { postJSON, apiFetch } from "@/lib/api";
@@ -82,7 +83,7 @@ export default function AdminDashboard() {
     addShop,
     addMaterial,
     user,
-    approvalRequests,
+    approvalRequests: shopRequests,
     supportMessages,
     submitShopForApproval,
     submitMaterialForApproval,
@@ -92,10 +93,8 @@ export default function AdminDashboard() {
     deleteMaterial,
     addSupportMessage,
     deleteMessage,
-  } = useData();
-
-  const {
-    materialApprovalRequests,
+    materialApprovalRequests: materialRequests,
+    supplierSubmissions,
     approveMaterial,
     rejectMaterial,
   } = useData();
@@ -117,7 +116,9 @@ export default function AdminDashboard() {
         const res = await fetch('/api/categories');
         if (res.ok) {
           const data = await res.json();
-          if (data?.categories) setCategories(data.categories);
+          if (data?.categories) {
+            setCategories(data.categories.sort((a: string, b: string) => a.localeCompare(b)));
+          }
         }
       } catch (e) {
         console.warn('load categories failed', e);
@@ -132,7 +133,9 @@ export default function AdminDashboard() {
         const res = await fetch('/api/subcategories-admin');
         if (res.ok) {
           const data = await res.json();
-          if (data?.subcategories) setSubCategories(data.subcategories);
+          if (data?.subcategories) {
+            setSubCategories(data.subcategories.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+          }
         }
       } catch (e) {
         console.warn('load subcategories failed', e);
@@ -149,7 +152,7 @@ export default function AdminDashboard() {
           const data = await res.json();
           if (data?.products) {
             const mapped = data.products.map((p: any) => mapProduct(p));
-            setProducts(mapped);
+            setProducts(mapped.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
           }
         }
       } catch (e) {
@@ -183,6 +186,12 @@ export default function AdminDashboard() {
   const [searchCategories, setSearchCategories] = useState("");
   const [searchSubCategories, setSearchSubCategories] = useState("");
   const [searchProducts, setSearchProducts] = useState("");
+
+  const [filterSubCategoryByCategory, setFilterSubCategoryByCategory] = useState("all");
+  const [filterProductByCategory, setFilterProductByCategory] = useState("all");
+  const [filterProductBySubCategory, setFilterProductBySubCategory] = useState("all");
+
+  const [showAddProductDialog, setShowAddProductDialog] = useState(false);
 
   // Handle Add Category
   const handleAddCategory = async () => {
@@ -324,6 +333,18 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCloneProduct = (product: any) => {
+    setNewProduct({
+      name: `${product.name} (Copy)`,
+      subcategory: product.subcategory || "",
+      taxCodeType: product.taxCodeType || null,
+      taxCodeValue: product.taxCodeValue || "",
+      hsnCode: product.hsn_code || product.hsnCode || "",
+      sacCode: product.sac_code || product.sacCode || "",
+    });
+    setShowAddProductDialog(true);
+  };
+
   // Handle Update Product
   const handleUpdateProduct = async () => {
     if (!editingProduct?.name?.trim()) {
@@ -447,113 +468,7 @@ export default function AdminDashboard() {
     );
   });
 
-  const [materialRequests, setMaterialRequests] = useState<any[]>([]);
-  const [shopRequests, setShopRequests] = useState<any[]>([]);
   const [supportMsgs, setSupportMsgs] = useState<any[]>([]);
-  const [supplierMaterialSubmissions, setSupplierMaterialSubmissions] = useState<any[]>([]);
-
-  // Load supplier material submissions (from material_submissions table)
-  useEffect(() => {
-    const loadSupplierSubmissions = async () => {
-      try {
-        const response = await apiFetch("/material-submissions-pending-approval");
-        if (response.ok) {
-          const data = await response.json();
-          // Transform the response to match material request format
-          const submissions = (data.submissions || []).map((s: any) => ({
-            id: s.submission.id,
-            status: "pending",
-            source: 'submission',
-            material: {
-              id: s.submission.id,
-              name: s.submission.template_name || "Supplier Material",
-              code: s.submission.template_code || "",
-              rate: s.submission.rate,
-              unit: s.submission.unit,
-              category: s.submission.category || s.submission.template_category || s.submission.template_category_name || "",
-              subCategory: s.submission.subcategory || s.submission.sub_category || "",
-              brandName: s.submission.brandname || s.submission.brandName || s.submission.brand || s.submission.make || "",
-              modelNumber: s.submission.modelnumber || s.submission.modelNumber || "",
-              technicalSpecification: s.submission.technicalspecification || s.submission.technicalSpecification || "",
-            },
-            submittedBy: s.submission.shop_name || "Supplier",
-            submittedAt: s.submission.created_at,
-            templateId: s.submission.template_id,
-            shopId: s.submission.shop_id,
-          }));
-          setSupplierMaterialSubmissions(submissions);
-        }
-      } catch (e) {
-        console.warn("Failed to load supplier material submissions", e);
-      }
-    };
-    loadSupplierSubmissions();
-  }, []);
-
-  // initialize local request lists from central store's approval lists
-  useEffect(() => {
-    setShopRequests(approvalRequests || []);
-  }, [approvalRequests]);
-
-  // Load shop approval requests directly from API (for purchase_team and admin)
-  useEffect(() => {
-    const loadShopApprovals = async () => {
-      try {
-        const res = await fetch('/api/shops-pending-approval');
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.shops) {
-            // Transform API response to match shopRequest format
-            const transformed = data.shops.map((r: any) => ({
-              id: r.id,
-              shop: r.shop || r,
-              status: r.status || 'pending',
-              submittedBy: r.submittedBy || 'Unknown',
-              submittedAt: r.submittedAt || new Date().toISOString(),
-            }));
-            setShopRequests(transformed);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load shop approvals from API', e);
-      }
-    };
-    loadShopApprovals();
-  }, []);
-
-  useEffect(() => {
-    // Combine manually created materials + supplier submissions
-    const combined = [...(materialApprovalRequests || []), ...supplierMaterialSubmissions];
-    setMaterialRequests(combined);
-  }, [materialApprovalRequests, supplierMaterialSubmissions]);
-
-  // Load material approval requests directly from API (for purchase_team and admin)
-  useEffect(() => {
-    const loadMaterialApprovals = async () => {
-      try {
-        const res = await fetch('/api/materials-pending-approval');
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.materials) {
-            // Transform API response to match materialRequest format
-            const transformed = data.materials.map((r: any) => ({
-              id: r.id,
-              material: r.material || r,
-              status: r.status || 'pending',
-              submittedBy: r.submittedBy || 'Unknown',
-              submittedAt: r.submittedAt || new Date().toISOString(),
-            }));
-            // Replace the material requests with API data
-            const combined = [...transformed, ...supplierMaterialSubmissions];
-            setMaterialRequests(combined);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to load material approvals from API', e);
-      }
-    };
-    loadMaterialApprovals();
-  }, [supplierMaterialSubmissions]);
 
   useEffect(() => {
     // initialize local copies from store
@@ -1055,20 +970,9 @@ export default function AdminDashboard() {
   const handleApproveMaterial = (requestId: string) => {
     (async () => {
       try {
-        // find the request to determine source
-        const req = materialRequests.find((r: any) => r.id === requestId) || supplierMaterialSubmissions.find((r: any) => r.id === requestId);
-        if (req && req.source === 'submission') {
-          // approve supplier submission
-          await postJSON(`/material-submissions/${requestId}/approve`, {});
-          // refresh supplier submissions list
-          setSupplierMaterialSubmissions((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          toast({ title: "Approved", description: "Supplier submission approved and material added" });
-        } else {
-          await approveMaterial?.(requestId);
-          setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          toast({ title: "Approved", description: "Material has been approved and added to the system" });
-        }
+        const req = materialRequests.find((r: any) => r.id === requestId);
+        await approveMaterial?.(requestId, req?.source);
+        toast({ title: "Approved", description: "Material approved successfully" });
       } catch (e) {
         toast({ title: "Error", description: "Failed to approve material", variant: "destructive" });
       }
@@ -1078,19 +982,11 @@ export default function AdminDashboard() {
   const handleRejectMaterial = (requestId: string) => {
     (async () => {
       try {
-        const req = materialRequests.find((r: any) => r.id === requestId) || supplierMaterialSubmissions.find((r: any) => r.id === requestId);
-        if (req && req.source === 'submission') {
-          await postJSON(`/material-submissions/${requestId}/reject`, { reason: rejectReason || 'Rejected by admin' });
-          setSupplierMaterialSubmissions((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          setRejectingId(null);
-          setRejectReason("");
-          toast({ title: "Rejected", description: "Supplier submission rejected" });
-        } else {
-          await rejectMaterial?.(requestId, "Rejected by admin");
-          setMaterialRequests((prev: any[]) => prev.filter((r: any) => r.id !== requestId));
-          toast({ title: "Rejected", description: "Material has been rejected" });
-        }
+        const req = materialRequests.find((r: any) => r.id === requestId);
+        await rejectMaterial?.(requestId, rejectReason, req?.source);
+        setRejectingId(null);
+        setRejectReason("");
+        toast({ title: "Rejected", description: "Material rejected successfully" });
       } catch (e) {
         toast({ title: "Error", description: "Failed to reject material", variant: "destructive" });
       }
@@ -1685,7 +1581,7 @@ export default function AdminDashboard() {
                       placeholder="Search categories..."
                     />
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                     {categories.length === 0 ? (
                       <p className="text-center text-muted-foreground py-6">No categories created yet</p>
                     ) : (
@@ -1842,19 +1738,37 @@ export default function AdminDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="mb-4">
-                    <Input
-                      value={searchSubCategories}
-                      onChange={(e) => setSearchSubCategories(e.target.value)}
-                      placeholder="Search subcategories..."
-                    />
+                  <div className="mb-4 flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                      <Input
+                        value={searchSubCategories}
+                        onChange={(e) => setSearchSubCategories(e.target.value)}
+                        placeholder="Search subcategories..."
+                      />
+                    </div>
+                    <div className="w-full md:w-64">
+                      <Select
+                        value={filterSubCategoryByCategory}
+                        onValueChange={setFilterSubCategoryByCategory}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by Category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          <SelectItem value="all">All Categories</SelectItem>
+                          {categories.map((cat: string) => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                     {subCategories.length === 0 ? (
                       <p className="text-center text-muted-foreground py-6">No subcategories created yet</p>
                     ) : (
                       subCategories
-                        .filter(sub => sub.name.toLowerCase().includes(searchSubCategories.toLowerCase()))
+                        .filter(sub => (filterSubCategoryByCategory === "all" || sub.category === filterSubCategoryByCategory) && sub.name.toLowerCase().includes(searchSubCategories.toLowerCase()))
                         .map((sub: any) => (
                           <div key={sub.id} className="p-4 border rounded-lg bg-white hover:border-green-400 transition">
                             <div className="flex items-center justify-between">
@@ -1977,7 +1891,7 @@ export default function AdminDashboard() {
                       <CardDescription className="text-blue-800">Add new products and assign subcategories</CardDescription>
                     </div>
                     {canCreateProduct && (<>
-                      <Dialog>
+                      <Dialog open={showAddProductDialog} onOpenChange={setShowAddProductDialog}>
                         <DialogTrigger asChild>
                           <Button className="bg-blue-600 hover:bg-blue-700">
                             <Plus className="h-4 w-4 mr-2" /> Add Product
@@ -2081,7 +1995,12 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                             <Button
-                              onClick={handleAddProduct}
+                              onClick={async () => {
+                                await handleAddProduct();
+                                if (newProduct.name.trim() && newProduct.subcategory) {
+                                  setShowAddProductDialog(false);
+                                }
+                              }}
                               className="w-full bg-blue-600 hover:bg-blue-700"
                             >
                               <Plus className="h-4 w-4 mr-2" /> Add Product
@@ -2093,19 +2012,67 @@ export default function AdminDashboard() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="mb-4">
-                    <Input
-                      value={searchProducts}
-                      onChange={(e) => setSearchProducts(e.target.value)}
-                      placeholder="Search products..."
-                    />
+                  <div className="mb-4 flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                      <Input
+                        value={searchProducts}
+                        onChange={(e) => setSearchProducts(e.target.value)}
+                        placeholder="Search products..."
+                      />
+                    </div>
+                    <div className="w-full md:w-48">
+                      <Select
+                        value={filterProductByCategory}
+                        onValueChange={(val) => {
+                          setFilterProductByCategory(val);
+                          setFilterProductBySubCategory("all");
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by Category" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          <SelectItem value="all">All Categories</SelectItem>
+                          {categories.map((cat: string) => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full md:w-48">
+                      <Select
+                        value={filterProductBySubCategory}
+                        onValueChange={setFilterProductBySubCategory}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by Subcategory" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          <SelectItem value="all">All Subcategories</SelectItem>
+                          {subCategories
+                            .filter(sub => filterProductByCategory === "all" || sub.category === filterProductByCategory)
+                            .map((sub: any) => (
+                              <SelectItem key={sub.id} value={sub.name}>{sub.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                     {products.length === 0 ? (
                       <p className="text-center text-muted-foreground py-6">No products created yet</p>
                     ) : (
                       products
-                        .filter(prod => prod.name.toLowerCase().includes(searchProducts.toLowerCase()))
+                        .filter(prod => {
+                          const matchesSearch = prod.name.toLowerCase().includes(searchProducts.toLowerCase());
+                          const matchesSubCategory = filterProductBySubCategory === "all" || prod.subcategory === filterProductBySubCategory;
+
+                          // To match by category, we need to find the category of the product's subcategory
+                          const prodSub = subCategories.find(s => s.name === prod.subcategory);
+                          const matchesCategory = filterProductByCategory === "all" || (prodSub && prodSub.category === filterProductByCategory);
+
+                          return matchesSearch && matchesSubCategory && matchesCategory;
+                        })
                         .map((product: any) => (
                           <div key={product.id} className="p-4 border rounded-lg bg-white hover:border-blue-400 transition">
                             <div className="flex items-center justify-between">
@@ -2125,6 +2092,9 @@ export default function AdminDashboard() {
                               </div>
                               {canManageProducts && (
                                 <div className="flex gap-2">
+                                  <Button size="sm" variant="ghost" onClick={() => handleCloneProduct(product)} title="Clone Product">
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
                                   <Button size="sm" variant="outline" onClick={() => {
                                     setEditingProduct(mapProduct(product));
                                   }}>
@@ -2616,15 +2586,15 @@ export default function AdminDashboard() {
                                           throw new Error(text || 'update failed');
                                         }
                                         const data = await res.json().catch(() => null);
-                                        setMasterMaterials(prev => prev.map(m => m.id === template.id ? { 
-                                          ...m, 
-                                          name: newMaterial.name, 
-                                          category: newMaterial.category, 
+                                        setMasterMaterials(prev => prev.map(m => m.id === template.id ? {
+                                          ...m,
+                                          name: newMaterial.name,
+                                          category: newMaterial.category,
                                           subcategory: newMaterial.subCategory,
                                           vendor_category: newMaterial.vendorCategory,
                                           tax_code_type: newMaterial.taxCodeType,
                                           tax_code_value: newMaterial.taxCodeValue,
-                                          ...(data?.template || {}) 
+                                          ...(data?.template || {})
                                         } : m));
                                         setEditingMaterialId(null);
                                         toast({ title: 'Success', description: 'Material template updated' });

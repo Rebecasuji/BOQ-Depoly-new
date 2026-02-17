@@ -80,7 +80,7 @@ export default function ManageProduct() {
             const res = await apiFetch("/api/products");
             if (!res.ok) throw new Error("Failed to fetch products");
             const data = await res.json();
-            return (data.products || []) as Product[];
+            return ((data.products || []) as Product[]).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         },
     });
 
@@ -91,7 +91,7 @@ export default function ManageProduct() {
             const res = await apiFetch("/api/material-categories");
             if (!res.ok) throw new Error("Failed to fetch categories");
             const data = await res.json();
-            return (data.categories || []) as string[];
+            return ((data.categories || []) as string[]).sort((a, b) => a.localeCompare(b));
         },
         enabled: step === 2,
     });
@@ -104,7 +104,7 @@ export default function ManageProduct() {
             if (!res.ok) throw new Error("Failed to fetch subcategories");
             const data = await res.json();
             // Subcategories route returns { subcategories: string[] }
-            return (data.subcategories || []) as string[];
+            return ((data.subcategories || []) as string[]).sort((a, b) => a.localeCompare(b));
         },
         enabled: step === 2 && !!selectedCategory && selectedCategory !== " ",
     });
@@ -116,7 +116,7 @@ export default function ManageProduct() {
             const res = await apiFetch("/api/materials");
             if (!res.ok) throw new Error("Failed to fetch materials");
             const data = await res.json();
-            return (data.materials || []) as Material[];
+            return ((data.materials || []) as Material[]).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         },
         enabled: step === 2,
     });
@@ -427,7 +427,7 @@ export default function ManageProduct() {
                                             <SelectTrigger className="h-11">
                                                 <SelectValue placeholder="All Categories" />
                                             </SelectTrigger>
-                                            <SelectContent>
+                                            <SelectContent className="max-h-[300px] overflow-y-auto">
                                                 <SelectItem value=" ">All Categories</SelectItem>
                                                 {categoriesData?.map((cat) => (
                                                     <SelectItem key={cat} value={cat}>
@@ -448,7 +448,7 @@ export default function ManageProduct() {
                                             <SelectTrigger className="h-11">
                                                 <SelectValue placeholder="All Subcategories" />
                                             </SelectTrigger>
-                                            <SelectContent>
+                                            <SelectContent className="max-h-[300px] overflow-y-auto">
                                                 <SelectItem value=" ">All Subcategories</SelectItem>
                                                 {subcategoriesData?.map((sub) => (
                                                     <SelectItem key={sub} value={sub}>
