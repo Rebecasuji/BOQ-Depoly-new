@@ -342,21 +342,35 @@ export default function ManageProduct() {
                                                         key={product.id}
                                                         className={`hover:bg-muted/20 transition-colors cursor-pointer ${selectedProduct?.id === product.id ? "bg-primary/5 hover:bg-primary/10" : ""
                                                             }`}
-                                                        onClick={() => setSelectedProduct(product)}
+                                                        onClick={() => {
+                                                            setSelectedProduct(product);
+                                                            // Reset state first
+                                                            setConfigName("");
+                                                            setSelectedCategory("");
+                                                            setSelectedSubcategory("");
+                                                            setSelectedMaterials([]);
+                                                            setConfigMaterials([]);
+                                                            // Then load if exists
+                                                            loadExistingConfig(product);
+                                                        }}
                                                     >
                                                         <TableCell onClick={(e) => e.stopPropagation()}>
                                                             <Checkbox
                                                                 checked={selectedProduct?.id === product.id}
-                                                                onCheckedChange={() => {
-                                                                    setSelectedProduct(product);
-                                                                    // Removed automatic loading of existing config
-                                                                    // loadExistingConfig(product);
-                                                                    // Reset form for new configuration
-                                                                    setConfigName("");
-                                                                    setSelectedCategory("");
-                                                                    setSelectedSubcategory("");
-                                                                    setSelectedMaterials([]);
-                                                                    setConfigMaterials([]);
+                                                                onCheckedChange={(checked) => {
+                                                                    if (checked) {
+                                                                        setSelectedProduct(product);
+                                                                        // Reset state first
+                                                                        setConfigName("");
+                                                                        setSelectedCategory("");
+                                                                        setSelectedSubcategory("");
+                                                                        setSelectedMaterials([]);
+                                                                        setConfigMaterials([]);
+                                                                        // Then load if exists
+                                                                        loadExistingConfig(product);
+                                                                    } else {
+                                                                        setSelectedProduct(null);
+                                                                    }
                                                                 }}
                                                             />
                                                         </TableCell>

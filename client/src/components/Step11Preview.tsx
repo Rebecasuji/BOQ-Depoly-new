@@ -272,13 +272,13 @@ export default function Step11Preview({
                         <td className="border-r border-black p-3 text-center font-bold">set</td>
                         <td className="border-r border-black p-3 text-center font-black">1</td>
                         <td className="border-r border-black p-3 text-right font-bold">
-                          ₹{step11Items.reduce((sum, item) => sum + (item.supply_rate || 0), 0).toLocaleString()}
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.qty || 1) * (item.supply_rate || 0)), 0).toLocaleString()}
                         </td>
                         <td className="border-r border-black p-3 text-right font-bold">
-                          ₹{step11Items.reduce((sum, item) => sum + (item.install_rate || 0), 0).toLocaleString()}
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.qty || 1) * (item.install_rate || 0)), 0).toLocaleString()}
                         </td>
                         <td className="p-3 text-right font-black text-primary">
-                          ₹{step11Items.reduce((sum, item) => sum + ((item.supply_rate || 0) + (item.install_rate || 0)), 0).toLocaleString()}
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.qty || 1) * ((item.supply_rate || 0) + (item.install_rate || 0))), 0).toLocaleString()}
                         </td>
                       </tr>
                     </tbody>
@@ -286,7 +286,7 @@ export default function Step11Preview({
                       <tr className="font-black text-[12px]">
                         <td colSpan={8} className="p-3 text-right uppercase">Grand Total Amount (INR)</td>
                         <td className="p-3 text-right text-primary text-sm font-black">
-                          ₹{step11Items.reduce((sum, item) => sum + ((item.supply_rate || 0) + (item.install_rate || 0)), 0).toLocaleString()}
+                          ₹{step11Items.reduce((sum, item) => sum + ((item.qty || 1) * ((item.supply_rate || 0) + (item.install_rate || 0))), 0).toLocaleString()}
                         </td>
                       </tr>
                     </tfoot>
@@ -311,8 +311,8 @@ export default function Step11Preview({
                 <Button
                   onClick={() => {
                     // Create single consolidated item to send to BOQ
-                    const totalSupply = step11Items.reduce((sum, item) => sum + (item.supply_rate || 0), 0);
-                    const totalInstall = step11Items.reduce((sum, item) => sum + (item.install_rate || 0), 0);
+                    const totalSupply = step11Items.reduce((sum, item) => sum + ((item.qty || 1) * (item.supply_rate || 0)), 0);
+                    const totalInstall = step11Items.reduce((sum, item) => sum + ((item.qty || 1) * (item.install_rate || 0)), 0);
 
                     const consolidatedItem: Step11Item = {
                       id: `CONSOLIDATED_${product.id}_${selectedConfig?.product.id || 'default'}`,
