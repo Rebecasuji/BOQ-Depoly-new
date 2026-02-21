@@ -270,17 +270,30 @@ export function Sidebar() {
                 </span>
               </Link>
 
-              <Link href="/create-boq">
+              <Link href="/create-bom">
                 <span
                   className={cn(
                     "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                    location === "/create-boq"
+                    location === "/create-bom"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
                   )}
                   onClick={() => setIsOpen(false)}
                 >
-                  <ShoppingCart className="h-4 w-4" /> Create BOQ
+                  <ShoppingCart className="h-4 w-4" /> Create BOM
+                </span>
+              </Link>
+              <Link href="/finalize-bom">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/finalize-bom"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Finalize BOM
                 </span>
               </Link>
               <Link href="/admin/dashboard?tab=create-product">
@@ -358,6 +371,20 @@ export function Sidebar() {
                   onClick={() => setIsOpen(false)}
                 >
                   <Package className="h-4 w-4" /> Manage Materials
+                </span>
+              </Link>
+
+              <Link href="/admin/bulk-material-upload">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    location === "/admin/bulk-material-upload"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Bulk Material Upload
                 </span>
               </Link>
 
@@ -483,17 +510,31 @@ export function Sidebar() {
                     </span>
                   </Link>
 
-                  <Link href="/create-boq">
+                  <Link href="/create-bom">
                     <span
                       className={cn(
                         "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                        location === "/create-boq"
+                        location === "/create-bom"
                           ? "bg-sidebar-primary text-sidebar-primary-foreground"
                           : "text-sidebar-foreground hover:bg-sidebar-accent",
                       )}
                       onClick={() => setIsOpen(false)}
                     >
-                      <ShoppingCart className="h-4 w-4" /> Create BOQ
+                      <ShoppingCart className="h-4 w-4" /> Create BOM
+                    </span>
+                  </Link>
+
+                  <Link href="/finalize-bom">
+                    <span
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                        location === "/finalize-bom"
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent",
+                      )}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" /> Finalize BOM
                     </span>
                   </Link>
                 </>

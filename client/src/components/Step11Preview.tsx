@@ -65,6 +65,7 @@ export default function Step11Preview({
   const [selectedConfig, setSelectedConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
+  const [showMaterialDetails, setShowMaterialDetails] = useState(false);
   const { toast } = useToast();
 
   // Load Step 11 snapshot for this product
@@ -73,7 +74,7 @@ export default function Step11Preview({
       try {
         setLoading(true);
 
-        // Fetch product configuration using the getJSON utility
+        // First: try step11_products (Step 4 / "Add to Create BOQ" saves)
         const data = await getJSON(
           `/api/step11-products/${encodeURIComponent(product.id)}`
         );
@@ -97,7 +98,7 @@ export default function Step11Preview({
             group_id: product.id,
             title: item.material_name || item.name || `Material ${index + 1}`,
             description: item.description || `${product.name} - ${item.material_name || item.name || `Material ${index + 1}`}`,
-            unit: item.unit || "pcs",
+            unit: firstConfig.product.required_unit_type || "Sqft",
             qty: Number(item.qty || item.quantity || 1),
             supply_rate: Number(item.supply_rate || item.rate || 0),
             install_rate: Number(item.install_rate || 0),
@@ -106,34 +107,126 @@ export default function Step11Preview({
           }));
 
           setStep11Items(step11ItemsFromConfig);
-        } else {
-          setConfigurations([]);
-          setStep11Items([]);
-
-          // Show helpful message with action
-          toast({
-            title: "Configuration Required",
-            description: `No saved configuration found for ${product.name}. You need to create one in Manage Product first.`,
-            action: {
-              label: "Go to Manage Product",
-              onClick: () => {
-                // Navigate to Manage Product page
-                window.location.href = "/admin/manage-product";
-              }
-            }
-          });
+          return; // Done — step11 data found
         }
-      } catch (error: any) {
-        console.error("Failed to load product snapshot:", error);
+
+        // Fallback: try product-step3-config (Step 3 "Save Configuration" saves)
+        try {
+          const step3Res = await apiFetch(`/api/product-step3-config/${encodeURIComponent(product.id)}`);
+          if (step3Res.ok) {
+            const step3Data = await step3Res.json();
+            if (step3Data.items && step3Data.items.length > 0) {
+              const config = step3Data.config;
+              // Build a synthetic "configuration" object matching step11 shape
+              const syntheticConfig = {
+                product: {
+                  id: config.id,
+                  config_name: config.config_name || product.name,
+                  required_unit_type: config.required_unit_type || "Sqft",
+                  created_at: config.created_at,
+                },
+                items: step3Data.items,
+              };
+              setConfigurations([syntheticConfig]);
+              setSelectedConfig(syntheticConfig);
+
+              const step11ItemsFromStep3 = step3Data.items.map((item: any, index: number) => ({
+                id: `step3_${config.id}_${index}`,
+                bill_no: `STEP3_${product.id}_${index}`,
+                estimator: getEstimatorTypeFromProduct(product) || "generic",
+                group_id: product.id,
+                title: item.material_name || `Material ${index + 1}`,
+                description: item.description || `${product.name} - ${item.material_name || `Material ${index + 1}`}`,
+                unit: config.required_unit_type || "Sqft",
+                qty: Number(item.base_qty || item.qty || 1),
+                supply_rate: Number(item.supply_rate || item.rate || 0),
+                install_rate: Number(item.install_rate || 0),
+                config_id: config.id,
+                material_id: item.material_id,
+              }));
+
+              setStep11Items(step11ItemsFromStep3);
+              return; // Done — step3 data found
+            }
+          }
+        } catch (step3Err) {
+          console.warn("Step3 config fallback failed:", step3Err);
+        }
+
+        // No configuration found in either table
         setConfigurations([]);
         setStep11Items([]);
 
-        if (error.message?.includes("HTTP 404")) {
+        toast({
+          title: "Configuration Required",
+          description: `No saved configuration found for ${product.name}. Please configure it in Manage Product first.`,
+          action: (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                window.location.href = "/admin/manage-product";
+              }}
+            >
+              Go to Manage Product
+            </Button>
+          )
+        });
+      } catch (error: any) {
+        // If step11 returns 404, try step3 config as fallback
+        if (error.message?.includes("HTTP 404") || error.message?.includes("404")) {
+          try {
+            const step3Res = await apiFetch(`/api/product-step3-config/${encodeURIComponent(product.id)}`);
+            if (step3Res.ok) {
+              const step3Data = await step3Res.json();
+              if (step3Data.items && step3Data.items.length > 0) {
+                const config = step3Data.config;
+                const syntheticConfig = {
+                  product: {
+                    id: config.id,
+                    config_name: config.config_name || product.name,
+                    required_unit_type: config.required_unit_type || "Sqft",
+                    created_at: config.created_at,
+                  },
+                  items: step3Data.items,
+                };
+                setConfigurations([syntheticConfig]);
+                setSelectedConfig(syntheticConfig);
+
+                const step11ItemsFromStep3 = step3Data.items.map((item: any, index: number) => ({
+                  id: `step3_${config.id}_${index}`,
+                  bill_no: `STEP3_${product.id}_${index}`,
+                  estimator: getEstimatorTypeFromProduct(product) || "generic",
+                  group_id: product.id,
+                  title: item.material_name || `Material ${index + 1}`,
+                  description: `${product.name} - ${item.material_name || `Material ${index + 1}`}`,
+                  unit: config.required_unit_type || "Sqft",
+                  qty: Number(item.base_qty || item.qty || 1),
+                  supply_rate: Number(item.supply_rate || item.rate || 0),
+                  install_rate: Number(item.install_rate || 0),
+                  config_id: config.id,
+                  material_id: item.material_id,
+                }));
+
+                setStep11Items(step11ItemsFromStep3);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch (step3Err) {
+            console.warn("Step3 config fallback also failed:", step3Err);
+          }
+
+          setConfigurations([]);
+          setStep11Items([]);
           toast({
             title: "Info",
             description: `No saved configuration found for ${product.name}. Please configure it in Manage Product first.`,
           });
         } else {
+          console.error("Failed to load product snapshot:", error);
+          setConfigurations([]);
+          setStep11Items([]);
           toast({
             title: "Error",
             description: "Failed to load product configuration",
@@ -164,7 +257,7 @@ export default function Step11Preview({
       group_id: product.id,
       title: item.material_name || item.name || `Material ${index + 1}`,
       description: item.description || `${product.name} - ${item.material_name || item.name || `Material ${index + 1}`}`,
-      unit: item.unit || "pcs",
+      unit: config.product.required_unit_type || "Sqft",
       qty: Number(item.qty || item.quantity || 1),
       supply_rate: Number(item.supply_rate || item.rate || 0),
       install_rate: Number(item.install_rate || 0),
@@ -269,7 +362,7 @@ export default function Step11Preview({
                         <td className="border-r border-black p-3 text-[10px] text-muted-foreground leading-tight">
                           Consolidated configuration for {product.name}
                         </td>
-                        <td className="border-r border-black p-3 text-center font-bold">set</td>
+                        <td className="border-r border-black p-3 text-center font-bold">{selectedConfig?.product.required_unit_type || "Sqft"}</td>
                         <td className="border-r border-black p-3 text-center font-black">1</td>
                         <td className="border-r border-black p-3 text-right font-bold">
                           ₹{step11Items.reduce((sum, item) => sum + ((item.qty || 1) * (item.supply_rate || 0)), 0).toLocaleString()}
@@ -296,6 +389,57 @@ export default function Step11Preview({
                 <p className="text-[10px] text-gray-500 italic mt-2">
                   * This is a consolidated view of {step11Items.length} materials.
                 </p>
+
+                {/* Material Details Toggle */}
+                <div className="mt-3">
+                  <button
+                    onClick={() => setShowMaterialDetails(prev => !prev)}
+                    className="text-xs text-purple-600 hover:text-purple-800 font-semibold underline flex items-center gap-1"
+                  >
+                    {showMaterialDetails ? '▲ Hide Material Details' : '▼ View All Material Items'}
+                  </button>
+                  {showMaterialDetails && step11Items.length > 0 && (
+                    <div className="mt-3 border border-purple-200 rounded-sm overflow-hidden">
+                      <table className="w-full border-collapse text-[10px]">
+                        <thead className="bg-purple-50">
+                          <tr className="font-bold text-purple-900 border-b border-purple-200">
+                            <th className="border border-purple-200 px-2 py-1 text-center w-8">#</th>
+                            <th className="border border-purple-200 px-2 py-1 text-left">Material</th>
+                            <th className="border border-purple-200 px-2 py-1 text-center w-14">Unit</th>
+                            <th className="border border-purple-200 px-2 py-1 text-center w-16">Qty</th>
+                            <th className="border border-purple-200 px-2 py-1 text-right w-24">Supply Rate</th>
+                            <th className="border border-purple-200 px-2 py-1 text-right w-24">Install Rate</th>
+                            <th className="border border-purple-200 px-2 py-1 text-right w-28">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {step11Items.map((item, idx) => {
+                            const amt = (item.qty || 1) * ((item.supply_rate || 0) + (item.install_rate || 0));
+                            return (
+                              <tr key={idx} className="border-b border-purple-100 hover:bg-purple-50/40">
+                                <td className="border border-purple-100 px-2 py-1 text-center text-gray-500">{idx + 1}</td>
+                                <td className="border border-purple-100 px-2 py-1 font-medium">{item.title}</td>
+                                <td className="border border-purple-100 px-2 py-1 text-center">{item.unit || '-'}</td>
+                                <td className="border border-purple-100 px-2 py-1 text-center font-bold text-blue-700">{item.qty || 1}</td>
+                                <td className="border border-purple-100 px-2 py-1 text-right text-green-700">₹{Number(item.supply_rate || 0).toLocaleString()}</td>
+                                <td className="border border-purple-100 px-2 py-1 text-right text-orange-600">₹{Number(item.install_rate || 0).toLocaleString()}</td>
+                                <td className="border border-purple-100 px-2 py-1 text-right font-bold">₹{amt.toLocaleString()}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-purple-50/50 font-bold">
+                          <tr>
+                            <td colSpan={6} className="border border-purple-200 px-2 py-1.5 text-right uppercase text-gray-500">Grand Total</td>
+                            <td className="border border-purple-200 px-2 py-1.5 text-right text-primary">
+                              ₹{step11Items.reduce((s, i) => s + ((i.qty || 1) * ((i.supply_rate || 0) + (i.install_rate || 0))), 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Action Buttons */}
@@ -321,7 +465,7 @@ export default function Step11Preview({
                       group_id: product.id,
                       title: product.name,
                       description: `Consolidated configuration for ${product.name}`,
-                      unit: "set",
+                      unit: selectedConfig?.product.required_unit_type || "Sqft",
                       qty: 1,
                       supply_rate: totalSupply,
                       install_rate: totalInstall,

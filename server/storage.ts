@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { hashPassword } from "./auth";
 import bcryptjs from "bcryptjs";
 import pg from "pg";
+import { pool } from "./db/client";
 
 /* ================= INTERFACE ================= */
 
@@ -19,16 +20,8 @@ export class PostgresStorage implements IStorage {
   private pool: pg.Pool;
 
   constructor() {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is not defined");
-    }
-
-    this.pool = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-    });
-
-    console.log("[storage] Using Supabase PostgreSQL");
+    this.pool = pool;
+    console.log("[storage] Using Shared Supabase PostgreSQL Pool");
 
     // Ensure approval columns exist (best-effort)
     this.ensureUserApprovalColumns().catch((err) => {

@@ -40,6 +40,8 @@ interface DataContextType {
   pendingShops?: any[];
   pendingMaterials?: any[];
   materialApprovalRequests?: any[];
+  setApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
+  setMaterialApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
   submitShopForApproval?: (shop: Partial<Shop>) => Promise<Shop | null>;
   submitMaterialForApproval?: (mat: Partial<Material>) => Promise<Material | null>;
   addShop: (shop: Partial<Shop>) => Promise<void>;
@@ -455,6 +457,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     pendingShops,
     pendingMaterials,
     materialApprovalRequests: [...(materialApprovalRequests || []), ...(supplierSubmissions || [])],
+    setApprovalRequests,
+    setMaterialApprovalRequests,
     supplierSubmissions,
     addShop,
     addMaterial,

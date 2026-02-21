@@ -252,6 +252,7 @@ export async function registerRoutes(
         project_id VARCHAR(100) NOT NULL,
         estimator VARCHAR(50) NOT NULL,
         table_data JSONB,
+        sort_order INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW(),
         FOREIGN KEY (project_id) REFERENCES boq_projects(id) ON DELETE CASCADE
       )
@@ -321,15 +322,18 @@ export async function registerRoutes(
     console.warn("[db] Could not ensure/populate boq_versions project columns:", (err as any)?.message || err);
   }
 
-  // Migrate boq_items to support version_id
+  // Migrate boq_items to support version_id and sort_order
   try {
     await query(
       `ALTER TABLE boq_items ADD COLUMN IF NOT EXISTS version_id VARCHAR(100)`,
     );
-    console.log("[db] boq_items version_id column ensured");
+    await query(
+      `ALTER TABLE boq_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0`,
+    );
+    console.log("[db] boq_items version_id and sort_order columns ensured");
   } catch (err: unknown) {
     console.warn(
-      "[db] Could not add version_id column to boq_items:",
+      "[db] Could not migrate boq_items columns:",
       (err as any)?.message || err,
     );
   }
@@ -385,6 +389,50 @@ export async function registerRoutes(
     console.warn("[db] Could not ensure step11_products tables:", (err as any)?.message || err);
   }
 
+  // Ensure Step 3 (configuration step) separate tables
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_step3_config (
+        id SERIAL PRIMARY KEY,
+        product_id VARCHAR(100) NOT NULL,
+        product_name VARCHAR(255) NOT NULL,
+        config_name VARCHAR(255) DEFAULT 'Default',
+        category_id VARCHAR(255),
+        subcategory_id VARCHAR(255),
+        total_cost DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await query(`
+      CREATE TABLE IF NOT EXISTS product_step3_config_items (
+        id SERIAL PRIMARY KEY,
+        step3_config_id INTEGER REFERENCES product_step3_config(id) ON DELETE CASCADE,
+        material_id VARCHAR(100),
+        material_name VARCHAR(255),
+        unit VARCHAR(50),
+        qty DECIMAL(15,2),
+        rate DECIMAL(15,2),
+        supply_rate DECIMAL(15,2),
+        install_rate DECIMAL(15,2),
+        location VARCHAR(255),
+        amount DECIMAL(15,4),
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log("[db] product_step3_config tables ensured");
+
+    // Add new BOQ architecture columns (safe, idempotent)
+    await query(`ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS required_unit_type VARCHAR(20) DEFAULT 'Sqft'`);
+    await query(`ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS base_required_qty DECIMAL(15,2) DEFAULT 1`);
+    await query(`ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS wastage_pct_default DECIMAL(8,6) DEFAULT 0`);
+    await query(`ALTER TABLE product_step3_config_items ADD COLUMN IF NOT EXISTS base_qty DECIMAL(15,2)`);
+    await query(`ALTER TABLE product_step3_config_items ADD COLUMN IF NOT EXISTS wastage_pct DECIMAL(8,6)`);
+    console.log("[db] product_step3_config BOQ columns ensured");
+  } catch (err: unknown) {
+    console.warn("[db] Could not ensure product_step3_config tables:", (err as any)?.message || err);
+  }
+
   // Ensure boq_items has a user_added flag (only items explicitly saved via Add Product)
   try {
     await query(
@@ -403,9 +451,15 @@ export async function registerRoutes(
     await query(
       `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(255)`,
     );
-    await query(
-      `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10) CHECK (tax_code_type IN ('hsn', 'sac'))`,
-    );
+    // Ensure column exists; then ensure the CHECK constraint allows NULL or the allowed values
+    await query(`ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10)`);
+    // Drop old constraint if it exists (safely), then add a correct one that allows NULL
+    try {
+      await query(`ALTER TABLE material_templates DROP CONSTRAINT IF EXISTS material_templates_tax_code_type_check`);
+    } catch (dropErr) {
+      // ignore
+    }
+    await query(`ALTER TABLE material_templates ADD CONSTRAINT material_templates_tax_code_type_check CHECK (tax_code_type IS NULL OR tax_code_type IN ('hsn', 'sac'))`);
     await query(
       `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(50)`,
     );
@@ -413,6 +467,20 @@ export async function registerRoutes(
   } catch (err: unknown) {
     console.warn(
       "[db] Could not ensure material_templates columns:",
+      (err as any)?.message || err,
+    );
+  }
+
+  // Ensure materials table has vendor_category, template_id, and optional tax columns
+  try {
+    await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS vendor_category VARCHAR(255)`);
+    await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS template_id UUID`);
+    await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10)`);
+    await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(50)`);
+    console.log("[db] materials vendor/template/tax columns ensured");
+  } catch (err: unknown) {
+    console.warn(
+      "[db] Could not ensure materials vendor/template/tax columns:",
       (err as any)?.message || err,
     );
   }
@@ -1020,7 +1088,11 @@ export async function registerRoutes(
     try {
       // Only return materials that are approved for public listing
       const result = await query(
-        "SELECT * FROM materials WHERE approved IS TRUE ORDER BY created_at DESC",
+        `SELECT m.*, s.name as shop_name 
+         FROM materials m 
+         LEFT JOIN shops s ON m.shop_id = s.id 
+         WHERE m.approved IS TRUE 
+         ORDER BY m.created_at DESC`,
       );
       res.json({ materials: result.rows });
     } catch (err) {
@@ -1829,7 +1901,7 @@ export async function registerRoutes(
           throw innerErr;
         }
 
-        if (result.rows.length === 0) {
+        if (checkResult.rows.length === 0) {
           console.log("[DELETE] No rows deleted");
           res.status(404).json({ message: "Template not found" });
           return;
@@ -1862,6 +1934,157 @@ export async function registerRoutes(
       res.status(500).json({ message: "failed to list categories" });
     }
   });
+
+  // POST /api/bulk-materials - Bulk upload material rows (admin / software_team / purchase_team)
+  app.post(
+    "/api/bulk-materials",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+
+      if (rows.length === 0) {
+        res.status(400).json({ message: "No rows provided" });
+        return;
+      }
+
+      const createdTemplates: any[] = [];
+      const createdMaterials: any[] = [];
+      const linkedMaterials: any[] = [];
+      const skipped: any[] = [];
+      const errors: any[] = [];
+
+      try {
+        await query("BEGIN");
+
+        for (let i = 0; i < rows.length; i++) {
+          const raw = rows[i] || {};
+          const name = (raw.name || raw.Name || "").toString().trim();
+          const code = (raw.code || raw.Code || raw.item_code || "").toString().trim();
+          const category = (raw.category || raw.Category || "").toString().trim() || null;
+          const subcategory = (raw.subcategory || raw.Subcategory || "").toString().trim() || null;
+          const unit = (raw.unit || raw.Unit || "").toString().trim() || null;
+          const rate = raw.rate !== undefined && raw.rate !== null ? Number(raw.rate) : null;
+          const vendor_category = (raw.vendor_category || raw.vendorCategory || null) || null;
+          let tax_code_type = (raw.tax_code_type || raw.taxCodeType || null) || null;
+          // Normalize tax_code_type to match DB constraint (only 'hsn' or 'sac')
+          if (tax_code_type) {
+            const t = String(tax_code_type).toLowerCase().trim();
+            if (t.includes("hsn")) tax_code_type = "hsn";
+            else if (t.includes("sac")) tax_code_type = "sac";
+            else if (t.includes("gst")) tax_code_type = "hsn"; // GST -> treat as HSN by default
+            else tax_code_type = null;
+          }
+          const tax_code_value = (raw.tax_code_value || raw.taxCodeValue || null) || null;
+
+          if (!name) {
+            skipped.push({ row: i, reason: "missing name" });
+            continue;
+          }
+
+          // Ensure or create material_template (non-destructive)
+          let templateId: string | null = null;
+
+          try {
+            // If code provided, prefer matching template by code
+            if (code) {
+              const existing = await query(`SELECT id FROM material_templates WHERE code = $1 LIMIT 1`, [code]);
+              if (existing.rows.length > 0) {
+                templateId = existing.rows[0].id;
+              }
+            }
+
+            if (!templateId) {
+              // Try by name
+              const byName = await query(`SELECT id FROM material_templates WHERE name = $1 LIMIT 1`, [name]);
+              if (byName.rows.length > 0) {
+                templateId = byName.rows[0].id;
+              }
+            }
+
+            if (!templateId) {
+              const tId = randomUUID();
+              const tCode = code || `ITM-${tId.slice(0, 8)}`;
+              const tpl = await query(
+                `INSERT INTO material_templates (id, name, code, category, subcategory, vendor_category, tax_code_type, tax_code_value, created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW()) RETURNING *`,
+                [tId, name, tCode, category, subcategory, vendor_category, tax_code_type, tax_code_value],
+              );
+              templateId = tpl.rows[0].id;
+              createdTemplates.push(tpl.rows[0]);
+            }
+          } catch (tplErr) {
+            errors.push({ row: i, error: String(tplErr) });
+            continue;
+          }
+
+          // Insert material if not exists (by code if present, else by name)
+          try {
+            let exists = null;
+            if (code) {
+              exists = await query(`SELECT id FROM materials WHERE code = $1 LIMIT 1`, [code]);
+            }
+            if (!exists || exists.rows.length === 0) {
+              const byName = await query(`SELECT id, template_id FROM materials WHERE name = $1 LIMIT 1`, [name]);
+              if (byName.rows.length > 0) {
+                // Material exists by name — ensure it's linked to template
+                const matId = byName.rows[0].id;
+                const currentTemplate = byName.rows[0].template_id || null;
+                if (!currentTemplate && templateId) {
+                  await query(`UPDATE materials SET template_id = $1 WHERE id = $2`, [templateId, matId]);
+                  linkedMaterials.push({ row: i, id: matId });
+                } else {
+                  skipped.push({ row: i, reason: 'material exists by name', id: matId });
+                }
+                continue;
+              }
+            } else {
+              // Material exists by code — ensure it's linked to template
+              const mat = exists.rows[0];
+              const matId = mat.id;
+              const matTemplateId = mat.template_id || null;
+              if (!matTemplateId && templateId) {
+                await query(`UPDATE materials SET template_id = $1 WHERE id = $2`, [templateId, matId]);
+                linkedMaterials.push({ row: i, id: matId });
+              } else {
+                skipped.push({ row: i, reason: 'material exists by code', id: matId });
+              }
+              continue;
+            }
+
+            const mId = randomUUID();
+            const mCode = code || `MAT-${mId.slice(0, 8)}`;
+            const insert = await query(
+              `INSERT INTO materials (id, name, code, rate, unit, category, subcategory, vendor_category, template_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *`,
+              [mId, name, mCode, rate, unit, category, subcategory, vendor_category, templateId],
+            );
+            createdMaterials.push(insert.rows[0]);
+          } catch (matErr) {
+            errors.push({ row: i, error: String(matErr) });
+            continue;
+          }
+        }
+
+        await query("COMMIT");
+
+        res.json({
+          message: "Bulk upload completed",
+          createdTemplatesCount: createdTemplates.length,
+          createdMaterialsCount: createdMaterials.length,
+          skipped,
+          errors,
+        });
+      } catch (err) {
+        try {
+          await query("ROLLBACK");
+        } catch (rbErr) {
+          console.error("rollback failed", rbErr);
+        }
+        console.error("/api/bulk-materials error", err);
+        res.status(500).json({ message: "bulk upload failed", error: String(err) });
+      }
+    },
+  );
 
   // GET /api/material-subcategories/:category - List subcategories created by admin/software_team/purchase_team
   app.get(
@@ -2703,7 +2926,8 @@ export async function registerRoutes(
     async (req: Request, res: Response) => {
       try {
         const { estimator_type } = req.params;
-        const userId = req.user.id;
+        const userId = (req as any).user?.id;
+        if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
         const result = await query(
           "SELECT data FROM accumulated_products WHERE user_id = $1 AND estimator_type = $2 ORDER BY created_at DESC LIMIT 1",
@@ -2730,7 +2954,8 @@ export async function registerRoutes(
     async (req: Request, res: Response) => {
       try {
         const { estimator_type } = req.params;
-        const userId = req.user.id;
+        const userId = (req as any).user?.id;
+        if (!userId) return res.status(401).json({ message: "Unauthorized" });
         const data = req.body.data;
 
         // Upsert: delete existing and insert new
@@ -2959,30 +3184,40 @@ export async function registerRoutes(
         }
 
         // Create new version (store project name, client, location for easier querying/version display)
+        // Also copy column_config from previous version if expanding from one
+        let initialColumnConfig = null;
+        if (copy_from_version) {
+          const prevVer = await query("SELECT column_config FROM boq_versions WHERE id = $1", [copy_from_version]);
+          if (prevVer.rows.length > 0) {
+            initialColumnConfig = prevVer.rows[0].column_config;
+          }
+        }
+
         await query(
-          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, version_number, status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())`,
-          [versionId, project_id, projectName, projectClient, projectLocation, nextVersion, "draft"],
+          `INSERT INTO boq_versions (id, project_id, project_name, project_client, project_location, version_number, status, column_config, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())`,
+          [versionId, project_id, projectName, projectClient, projectLocation, nextVersion, "draft", initialColumnConfig],
         );
 
         // Copy items from previous version if requested
         if (copy_from_version) {
           const itemsResult = await query(
-            `SELECT * FROM boq_items WHERE version_id = $1`,
+            `SELECT * FROM boq_items WHERE version_id = $1 ORDER BY sort_order ASC, created_at ASC`,
             [copy_from_version],
           );
 
           for (const item of itemsResult.rows) {
             const newItemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
             await query(
-              `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, created_at)
-               VALUES ($1, $2, $3, $4, $5, NOW())`,
+              `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, sort_order, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
               [
                 newItemId,
                 project_id,
                 item.estimator,
                 item.table_data,
                 versionId,
+                item.sort_order, // Copy sort_order
               ],
             );
           }
@@ -3134,15 +3369,31 @@ export async function registerRoutes(
         const { versionId } = req.params;
         const { status } = req.body;
 
-        if (!status || !["draft", "submitted"].includes(status)) {
+
+
+        if (status && !["draft", "submitted"].includes(status)) {
           res.status(400).json({ message: "Invalid status" });
           return;
         }
 
-        await query(
-          `UPDATE boq_versions SET status = $1, updated_at = NOW() WHERE id = $2`,
-          [status, versionId],
-        );
+        if (!status && req.body.column_config === undefined) {
+          // allow updating just column_config without status
+        }
+
+
+        if (req.body.column_config !== undefined) {
+          await query(
+            `UPDATE boq_versions SET column_config = $1, updated_at = NOW() WHERE id = $2`,
+            [req.body.column_config, versionId]
+          );
+        }
+
+        if (status) {
+          await query(
+            `UPDATE boq_versions SET status = $1, updated_at = NOW() WHERE id = $2`,
+            [status, versionId],
+          );
+        }
 
         res.json({ message: "Version updated" });
       } catch (err) {
@@ -3150,6 +3401,27 @@ export async function registerRoutes(
         res.status(500).json({ message: "Failed to update version" });
       }
     },
+  );
+
+  // GET /api/boq-versions/:versionId - Get a specific version
+  app.get(
+    "/api/boq-versions/:versionId",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        const { versionId } = req.params;
+        const result = await query("SELECT * FROM boq_versions WHERE id = $1", [versionId]);
+
+        if (result.rows.length === 0) {
+          return res.status(404).json({ message: "Version not found" });
+        }
+
+        res.json(result.rows[0]);
+      } catch (err) {
+        console.error("GET /api/boq-versions/:versionId error", err);
+        res.status(500).json({ message: "Failed to fetch version" });
+      }
+    }
   );
 
   // DELETE /api/boq-versions/:versionId - Delete a version and its items
@@ -3218,22 +3490,30 @@ export async function registerRoutes(
         const itemId = `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         console.log("Creating BOQ item with ID:", itemId);
 
+        // Determine the next sort_order for this version
+        const maxSortOrderResult = await query(
+          `SELECT MAX(sort_order) as max_sort_order FROM boq_items WHERE version_id = $1`,
+          [version_id],
+        );
+        const nextSortOrder = (maxSortOrderResult.rows[0]?.max_sort_order || 0) + 1;
+
         await query(
-          `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, user_added, created_at)
-         VALUES ($1, $2, $3, $4, $5, true, NOW())`,
+          `INSERT INTO boq_items (id, project_id, estimator, table_data, version_id, user_added, sort_order, created_at)
+         VALUES ($1, $2, $3, $4, $5, true, $6, NOW())`,
           [
             itemId,
             project_id,
             estimator,
             JSON.stringify(table_data),
             version_id || null,
+            nextSortOrder,
           ],
         );
 
         // Confirm row persisted by selecting it back
         try {
           const check = await query(
-            `SELECT id, project_id, version_id, estimator, table_data, user_added, created_at FROM boq_items WHERE id = $1`,
+            `SELECT id, project_id, version_id, estimator, table_data, user_added, sort_order, created_at FROM boq_items WHERE id = $1`,
             [itemId],
           );
           const inserted = check.rows[0];
@@ -3243,6 +3523,7 @@ export async function registerRoutes(
             version_id: inserted?.version_id,
             estimator: inserted?.estimator,
             user_added: inserted?.user_added,
+            sort_order: inserted?.sort_order,
             created_at: inserted?.created_at,
           });
         } catch (e) {
@@ -3255,6 +3536,7 @@ export async function registerRoutes(
           version_id,
           estimator,
           table_data,
+          sort_order: nextSortOrder,
         };
 
         res.json(responseData);
@@ -3274,6 +3556,43 @@ export async function registerRoutes(
     },
   );
 
+  // GET /api/boq-items/finalized - Fetch ALL finalized items
+  app.get(
+    "/api/boq-items/finalized",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      try {
+        // Cast table_data to jsonb to query inside it. 
+        // We use boolean check or string check depending on how it was stored.
+        // The frontend stores `is_finalized: true` (boolean), so ->> returns 'true' string.
+        const result = await query(
+          `SELECT id, project_id, version_id, estimator, table_data, created_at 
+           FROM boq_items 
+           WHERE (table_data::jsonb)->>'is_finalized' = 'true'
+           ORDER BY sort_order ASC, created_at DESC`, // Added sort_order
+          [],
+        );
+
+        const items = result.rows.map((row: any) => ({
+          id: row.id,
+          project_id: row.project_id,
+          version_id: row.version_id,
+          estimator: row.estimator,
+          table_data:
+            typeof row.table_data === "string"
+              ? JSON.parse(row.table_data)
+              : row.table_data,
+          created_at: row.created_at,
+        }));
+
+        res.json({ items });
+      } catch (err) {
+        console.error("GET /api/boq-items/finalized error", err);
+        res.status(500).json({ message: "Failed to fetch finalized items" });
+      }
+    },
+  );
+
   // GET /api/boq-items/version/:versionId - Fetch BOQ items for a specific version
   app.get(
     "/api/boq-items/version/:versionId",
@@ -3283,8 +3602,10 @@ export async function registerRoutes(
         const { versionId } = req.params;
 
         const result = await query(
-          `SELECT id, project_id, version_id, estimator, table_data, created_at FROM boq_items 
-         WHERE version_id = $1 AND user_added = true ORDER BY created_at ASC`,
+          `SELECT id, project_id, version_id, estimator, table_data, created_at 
+         FROM boq_items 
+         WHERE version_id = $1 AND user_added = true 
+         ORDER BY sort_order ASC, created_at ASC`, // Added sort_order
           [versionId],
         );
 
@@ -3311,6 +3632,40 @@ export async function registerRoutes(
       } catch (err) {
         console.error("GET /api/boq-items/version error", err);
         res.status(500).json({ message: "Failed to fetch BOQ items" });
+      }
+    },
+  );
+
+  // POST /api/boq-items/reorder - Persist new sort order for BOM items
+  app.post(
+    "/api/boq-items/reorder",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team", "pre_sales"),
+    async (req: Request, res: Response) => {
+      try {
+        const { itemIds } = req.body; // Expects array of item IDs in correct order
+        if (!Array.isArray(itemIds)) {
+          return res.status(400).json({ message: "itemIds array is required" });
+        }
+
+        console.log("Reordering items:", itemIds.length);
+
+        // Update each item with its new sort order (index in the array)
+        // Using a transaction for efficiency and safety
+        await query("BEGIN");
+        for (let i = 0; i < itemIds.length; i++) {
+          await query(
+            "UPDATE boq_items SET sort_order = $1 WHERE id = $2",
+            [i, itemIds[i]]
+          );
+        }
+        await query("COMMIT");
+
+        res.json({ message: "Sort order updated successfully" });
+      } catch (err: any) {
+        await query("ROLLBACK");
+        console.error("POST /api/boq-items/reorder error", err);
+        res.status(500).json({ message: "Failed to update sort order" });
       }
     },
   );
@@ -3732,7 +4087,7 @@ export async function registerRoutes(
 
         // Filter items that match the product name with strict matching
         // Get the first significant word of the product name (e.g., "Flush" from "Flush Door")
-        const productWords = productName.split(" ").filter((w) => w.length > 2);
+        const productWords = productName.split(" ").filter((w: string) => w.length > 2);
         const primaryWord = productWords[0]; // e.g., "flush" or "glass"
 
         const filteredRows = result.rows.filter((row: any) => {
@@ -3965,13 +4320,34 @@ export async function registerRoutes(
             ]);
           }
 
+          // ensure columns exist
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS required_unit_type VARCHAR(20)");
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS base_required_qty DECIMAL(10,4)");
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS wastage_pct_default DECIMAL(10,4)");
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS dim_a DECIMAL(10,4)");
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS dim_b DECIMAL(10,4)");
+          await query("ALTER TABLE step11_products ADD COLUMN IF NOT EXISTS dim_c DECIMAL(10,4)");
+
           // 2. Insert into step11_products
           console.log(`[POST /api/step11-products] Inserting new product config for productId: ${productId}`);
           const productResult = await query(
-            `INSERT INTO step11_products (product_id, product_name, config_name, category_id, subcategory_id, total_cost, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+            `INSERT INTO step11_products (product_id, product_name, config_name, category_id, subcategory_id, total_cost, required_unit_type, base_required_qty, wastage_pct_default, dim_a, dim_b, dim_c, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
              RETURNING id`,
-            [productId, productName, configName || 'Default Configuration', categoryId, subcategoryId, totalCost],
+            [
+              productId,
+              productName,
+              configName || 'Default Configuration',
+              categoryId,
+              subcategoryId,
+              totalCost,
+              req.body.requiredUnitType || 'Sqft',
+              req.body.baseRequiredQty || 1,
+              req.body.wastagePctDefault || 0,
+              req.body.dimA || null,
+              req.body.dimB || null,
+              req.body.dimC || null
+            ],
           );
 
           const step11ProductId = productResult.rows[0].id;
@@ -3983,10 +4359,13 @@ export async function registerRoutes(
             for (let i = 0; i < items.length; i++) {
               const item = items[i];
               console.log(`[POST /api/step11-products] Inserting item ${i + 1}/${items.length}:`, JSON.stringify(item));
+              // ensure column exists
+              await query("ALTER TABLE step11_product_items ADD COLUMN IF NOT EXISTS apply_wastage BOOLEAN DEFAULT TRUE");
+
               await query(
                 `INSERT INTO step11_product_items 
-                 (step11_product_id, material_id, material_name, unit, qty, rate, supply_rate, install_rate, location, amount)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                 (step11_product_id, material_id, material_name, unit, qty, rate, supply_rate, install_rate, location, amount, apply_wastage)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
                 [
                   step11ProductId,
                   item.materialId,
@@ -3998,6 +4377,7 @@ export async function registerRoutes(
                   item.installRate,
                   item.location,
                   item.amount,
+                  item.applyWastage !== undefined ? item.applyWastage : true
                 ],
               );
             }
@@ -4020,6 +4400,144 @@ export async function registerRoutes(
     },
   );
 
+  // POST /api/product-step3-config - Save Step 3 (configuration step) data separately
+  app.post(
+    "/api/product-step3-config",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      try {
+        const {
+          productId,
+          productName,
+          configName,
+          categoryId,
+          subcategoryId,
+          totalCost,
+          items,
+          requiredUnitType,
+          baseRequiredQty,
+          wastagePctDefault,
+          dimA,
+          dimB,
+          dimC
+        } = req.body;
+
+        if (!productId) {
+          res.status(400).json({ message: "Product ID is required" });
+          return;
+        }
+
+        await query("BEGIN");
+        try {
+          // Delete existing Step 3 config for this product (overwrite)
+          await query("DELETE FROM product_step3_config WHERE product_id = $1", [productId]);
+
+          // ensure columns exist
+          await query("ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS dim_a DECIMAL(10,4)");
+          await query("ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS dim_b DECIMAL(10,4)");
+          await query("ALTER TABLE product_step3_config ADD COLUMN IF NOT EXISTS dim_c DECIMAL(10,4)");
+
+          // Insert new Step 3 config header
+          const configResult = await query(
+            `INSERT INTO product_step3_config (
+              product_id, product_name, config_name, category_id, subcategory_id, 
+              total_cost, required_unit_type, base_required_qty, wastage_pct_default,
+              dim_a, dim_b, dim_c,
+              created_at, updated_at
+            )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW()) RETURNING id`,
+            [
+              productId,
+              productName,
+              configName || "Default",
+              categoryId,
+              subcategoryId,
+              totalCost,
+              requiredUnitType || 'Sqft',
+              baseRequiredQty || 1,
+              wastagePctDefault || 0,
+              dimA || null,
+              dimB || null,
+              dimC || null
+            ],
+          );
+
+          const step3ConfigId = configResult.rows[0].id;
+
+          // insert items
+          if (items && Array.isArray(items)) {
+            // ensure column exists
+            await query("ALTER TABLE product_step3_config_items ADD COLUMN IF NOT EXISTS apply_wastage BOOLEAN DEFAULT TRUE");
+
+            // Add column_config to boq_versions
+            await query("ALTER TABLE boq_versions ADD COLUMN IF NOT EXISTS column_config JSONB DEFAULT NULL");
+
+            for (const item of items) {
+              await query(
+                `INSERT INTO product_step3_config_items
+                 (step3_config_id, material_id, material_name, unit, qty, rate, supply_rate, install_rate, location, amount, base_qty, wastage_pct, apply_wastage)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+                [
+                  step3ConfigId,
+                  item.materialId,
+                  item.materialName,
+                  item.unit,
+                  item.qty,
+                  item.rate,
+                  item.supplyRate,
+                  item.installRate,
+                  item.location,
+                  item.amount,
+                  item.baseQty,
+                  item.wastagePct,
+                  item.applyWastage !== undefined ? item.applyWastage : true
+                ],
+              );
+            }
+          }
+
+          await query("COMMIT");
+          res.status(201).json({ message: "Step 3 configuration saved successfully", id: step3ConfigId });
+        } catch (err) {
+          await query("ROLLBACK");
+          throw err;
+        }
+      } catch (err) {
+        console.error("POST /api/product-step3-config error:", err instanceof Error ? err.message : err);
+        res.status(500).json({ message: "Failed to save Step 3 configuration", error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // GET /api/product-step3-config/:productId - Load Step 3 config for a product
+  app.get(
+    "/api/product-step3-config/:productId",
+    authMiddleware,
+    async (req: Request, res: Response) => {
+      const { productId } = req.params;
+      try {
+        const configResult = await query(
+          "SELECT * FROM product_step3_config WHERE product_id = $1 ORDER BY updated_at DESC LIMIT 1",
+          [productId],
+        );
+        if (configResult.rows.length === 0) {
+          res.status(404).json({ message: "No Step 3 configuration found" });
+          return;
+        }
+        const config = configResult.rows[0];
+        const itemsResult = await query(
+          "SELECT * FROM product_step3_config_items WHERE step3_config_id = $1 ORDER BY id ASC",
+          [config.id],
+        );
+        res.json({ config, items: itemsResult.rows });
+      } catch (err) {
+        console.error("GET /api/product-step3-config/:productId error:", err);
+        res.status(500).json({ message: "Failed to load Step 3 configuration" });
+      }
+    },
+  );
+
   // GET /api/step11-products/:productId - Load ALL configurations for this product
   app.get(
     "/api/step11-products/:productId",
@@ -4037,8 +4555,20 @@ export async function registerRoutes(
         const resLog = `  -> Found ${productResult.rows.length} configurations\n`;
         fs.appendFileSync('server_api_log.txt', resLog);
 
+        // Fetch latest Step 3 config for this product to use as smart fallback
+        const step3Result = await query(
+          "SELECT required_unit_type, base_required_qty, wastage_pct_default FROM product_step3_config WHERE product_id = $1 ORDER BY updated_at DESC LIMIT 1",
+          [productId]
+        );
+        const step3Fallback = step3Result.rows[0] || { required_unit_type: 'Sqft', base_required_qty: 100, wastage_pct_default: 0 };
+
         // Enhance configurations with their items
         const enhancedConfigs = await Promise.all(productResult.rows.map(async (p: any) => {
+          // Apply fallbacks from Step 3 if Step 11 is missing them or using legacy defaults
+          p.required_unit_type = p.required_unit_type || step3Fallback.required_unit_type || 'Sqft';
+          p.base_required_qty = p.base_required_qty || step3Fallback.base_required_qty || 100;
+          p.wastage_pct_default = p.wastage_pct_default || step3Fallback.wastage_pct_default || 0;
+
           const itemsResult = await query(
             "SELECT * FROM step11_product_items WHERE step11_product_id = $1",
             [p.id],
@@ -4077,6 +4607,17 @@ export async function registerRoutes(
         }
 
         const product = productResult.rows[0];
+        // Fetch Step 3 fallback for legacy records
+        const step3Result = await query(
+          "SELECT required_unit_type, base_required_qty, wastage_pct_default FROM product_step3_config WHERE product_id = $1 ORDER BY updated_at DESC LIMIT 1",
+          [product.product_id]
+        );
+        const step3Fallback = step3Result.rows[0] || { required_unit_type: 'Sqft', base_required_qty: 100, wastage_pct_default: 0 };
+
+        // Apply fallbacks for legacy records
+        product.required_unit_type = product.required_unit_type || step3Fallback.required_unit_type || 'Sqft';
+        product.base_required_qty = product.base_required_qty || step3Fallback.base_required_qty || 100;
+        product.wastage_pct_default = product.wastage_pct_default || step3Fallback.wastage_pct_default || 0;
 
         const itemsResult = await query(
           "SELECT * FROM step11_product_items WHERE step11_product_id = $1",
@@ -4092,6 +4633,32 @@ export async function registerRoutes(
         res.status(500).json({ message: "Failed to load specific configuration" });
       }
     },
+  );
+
+  // DELETE /api/step11-products/config/:id - Delete a configuration
+  app.delete(
+    "/api/step11-products/config/:id",
+    authMiddleware,
+    requireRole("admin", "software_team", "purchase_team"),
+    async (req: Request, res: Response) => {
+      const { id } = req.params;
+      try {
+        await query("BEGIN");
+        // items are deleted automatically due to ON DELETE CASCADE
+        const result = await query("DELETE FROM step11_products WHERE id = $1", [id]);
+        await query("COMMIT");
+
+        if (result.rowCount === 0) {
+          res.status(404).json({ message: "Configuration not found" });
+          return;
+        }
+        res.json({ message: "Configuration deleted successfully" });
+      } catch (err) {
+        await query("ROLLBACK");
+        console.error("DELETE /api/step11-products/config/:id error", err);
+        res.status(500).json({ message: "Failed to delete configuration" });
+      }
+    }
   );
 
   return httpServer;

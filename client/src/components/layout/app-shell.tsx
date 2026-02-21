@@ -47,6 +47,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         roles: ["admin", "software_team", "purchase_team"],
       },
       {
+        label: "Bulk Material Upload",
+        href: "/admin/bulk-material-upload",
+        roles: ["admin", "software_team", "purchase_team"],
+      },
+      {
         label: "Categories",
         href: "/admin/dashboard?tab=categories",
         roles: ["admin", "software_team", "purchase_team"],

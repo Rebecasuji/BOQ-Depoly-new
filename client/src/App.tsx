@@ -24,6 +24,7 @@ import SupplierApproval from "@/pages/SupplierApproval";
 import MaterialSubmissionApproval from "@/pages/admin/MaterialSubmissionApproval";
 import ManageProduct from "@/pages/admin/ManageProduct";
 import VendorCategories from "@/pages/admin/VendorCategories";
+import BulkMaterialUpload from "@/pages/admin/BulkMaterialUpload";
 
 import CivilWallEstimator from "@/pages/estimators/CivilWallEstimator";
 import FlooringEstimator from "@/pages/estimators/FlooringEstimator";
@@ -42,6 +43,7 @@ import ItemMaster from "@/pages/ItemMaster";
 import Subscription from "@/pages/Subscription";
 import BoqReview from "@/pages/BoqReview";
 import CreateBoq from "@/pages/CreateBoq";
+import FinalizeBoq from "@/pages/FinalizeBoq";
 import CreateProject from "@/pages/CreateProject";
 
 import SupplierMaterials from "@/pages/supplier/SupplierMaterials";
@@ -72,9 +74,10 @@ function Router() {
       {/* ================= MISC ================= */}
       <Route path="/subscription" component={Subscription} />
       <Route path="/create-project" component={CreateProject} />
-      <Route path="/create-boq" component={CreateBoq} />
+      <Route path="/create-bom" component={CreateBoq} />
+      <Route path="/finalize-bom" component={FinalizeBoq} />
       <Route path="/item-master" component={ItemMaster} />
-      <Route path="/boq-review" component={BoqReview} />
+      <Route path="/bom-review" component={BoqReview} />
 
       {/* ================= ESTIMATORS ================= */}
       {/* Hardcoded estimators for predefined categories */}
@@ -101,6 +104,7 @@ function Router() {
 
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/manage-materials" component={ManageMaterialsPage} />
+      <Route path="/admin/bulk-material-upload" component={BulkMaterialUpload} />
       <Route path="/admin/manage-product" component={ManageProduct} />
       <Route path="/admin/vendor-categories" component={VendorCategories} />
 

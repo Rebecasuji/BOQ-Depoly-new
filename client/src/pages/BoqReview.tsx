@@ -115,11 +115,11 @@ export default function BoqReview() {
     const element = document.getElementById("boq-review-pdf");
     if (!element) return;
 
-    const sessionId = step9Data[0]?.session_id || "BOQ";
+    const sessionId = step9Data[0]?.session_id || "BOM";
     html2pdf()
       .set({
         margin: 10,
-        filename: `BOQ_Review_${sessionId}.pdf`,
+        filename: `BOM_Review_${sessionId}.pdf`,
         html2canvas: { scale: 2 },
         jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       })
@@ -130,7 +130,7 @@ export default function BoqReview() {
   return (
     <Layout>
       <div className="max-w-6xl mx-auto space-y-8">
-        <h2 className="text-3xl font-bold">BOQ Review - Step 9</h2>
+        <h2 className="text-3xl font-bold">BOM Review - Step 9</h2>
 
         <Card>
           <CardContent className="pt-8 space-y-6">
@@ -160,11 +160,11 @@ export default function BoqReview() {
               </div>
             </div>
 
-            {/* BOQ Table */}
+            {/* BOM Table */}
             {step9Data.length > 0 && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">Add to BOQ</h3>
+                  <h3 className="text-lg font-semibold">Add to BOM</h3>
                   {selectedItems.size > 0 && (
                     <>
                       <Button

@@ -4,3 +4,195 @@
   -> Found 4 configurations
 [2026-02-16T11:36:34.077Z] GET /api/step11-products/a220e292-cc61-4f8f-988a-8a3287b386b2
   -> Found 2 configurations
+[2026-02-16T12:10:36.258Z] GET /api/step11-products/43dabf84-d7db-4bf6-ac94-fc025de559be
+  -> Found 4 configurations
+[2026-02-16T12:19:56.465Z] GET /api/step11-products/d1d3abf5-cbd2-4037-9582-5b4586a1715d
+  -> Found 0 configurations
+[2026-02-16T12:42:24.858Z] GET /api/step11-products/43dabf84-d7db-4bf6-ac94-fc025de559be
+  -> Found 4 configurations
+[2026-02-16T12:43:10.114Z] GET /api/step11-products/616c2ade-0474-4a75-bbbb-f8d410a2096b
+  -> Found 2 configurations
+[2026-02-16T13:00:49.841Z] GET /api/step11-products/43dabf84-d7db-4bf6-ac94-fc025de559be
+  -> Found 4 configurations
+[2026-02-17T04:44:12.560Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 1 configurations
+[2026-02-17T04:45:48.241Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 1 configurations
+[2026-02-17T05:42:00.448Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T05:42:20.061Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 5 configurations
+[2026-02-17T05:54:21.085Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 5 configurations
+[2026-02-17T05:55:06.057Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-17T05:55:20.729Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T05:56:17.087Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T06:06:05.334Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-17T06:06:10.235Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T06:06:13.280Z] GET /api/step11-products/d0cff484-1f0f-4d67-9e26-d1cb31222a11
+  -> Found 0 configurations
+[2026-02-17T06:06:16.365Z] GET /api/step11-products/0a0871a6-a516-42df-9cc7-8065eac3c151
+  -> Found 0 configurations
+[2026-02-17T06:06:18.273Z] GET /api/step11-products/d0cff484-1f0f-4d67-9e26-d1cb31222a11
+  -> Found 0 configurations
+[2026-02-17T06:06:20.382Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-17T06:06:23.225Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T06:13:27.678Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T06:15:22.488Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-17T06:15:33.345Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-17T06:21:04.790Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-17T06:49:37.782Z] GET /api/step11-products/50ad0858-7ead-452e-b472-b5e3fabbd1e4
+  -> Found 0 configurations
+[2026-02-17T06:50:46.881Z] GET /api/step11-products/50ad0858-7ead-452e-b472-b5e3fabbd1e4
+  -> Found 0 configurations
+[2026-02-17T13:14:47.770Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-18T04:18:20.451Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T04:19:30.361Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T04:39:06.185Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T04:51:37.883Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-18T04:54:02.163Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T05:44:44.768Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T05:49:40.814Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T05:59:21.247Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T05:59:47.019Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T06:08:35.813Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T10:32:47.041Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T10:39:33.063Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T10:40:26.083Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 6 configurations
+[2026-02-18T10:49:00.451Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-18T10:52:58.200Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-18T12:05:53.460Z] GET /api/step11-products/50ad0858-7ead-452e-b472-b5e3fabbd1e4
+  -> Found 0 configurations
+[2026-02-19T04:58:23.893Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-19T05:05:04.964Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-19T05:09:57.053Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-19T05:14:33.646Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T04:29:43.557Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T04:30:48.128Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T04:32:08.188Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T04:34:03.160Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T04:56:32.234Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T05:21:39.850Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T05:55:41.557Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T05:55:49.919Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T05:56:27.818Z] GET /api/step11-products/50ad0858-7ead-452e-b472-b5e3fabbd1e4
+  -> Found 0 configurations
+[2026-02-20T05:56:34.678Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T05:59:36.426Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T06:02:00.422Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T06:09:23.645Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T06:21:55.405Z] GET /api/step11-products/d1d3abf5-cbd2-4037-9582-5b4586a1715d
+  -> Found 0 configurations
+[2026-02-20T06:38:52.732Z] GET /api/step11-products/115ef3c6-7d6e-4b95-ac7b-a45d694d09c4
+  -> Found 0 configurations
+[2026-02-20T06:40:26.773Z] GET /api/step11-products/115ef3c6-7d6e-4b95-ac7b-a45d694d09c4
+  -> Found 1 configurations
+[2026-02-20T06:40:46.137Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T06:57:04.653Z] GET /api/step11-products/b5cd87a4-3aca-4018-9515-6e5b8e0b356a
+  -> Found 2 configurations
+[2026-02-20T07:41:58.389Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 0 configurations
+[2026-02-20T07:42:33.286Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 0 configurations
+[2026-02-20T10:43:50.147Z] GET /api/step11-products/7e578f3e-159f-41df-bf17-ef7599660b14
+  -> Found 0 configurations
+[2026-02-20T10:45:10.720Z] GET /api/step11-products/d0cff484-1f0f-4d67-9e26-d1cb31222a11
+  -> Found 0 configurations
+[2026-02-20T10:45:47.786Z] GET /api/step11-products/5f02bdcf-882a-4d06-823c-78cb1e5143a2
+  -> Found 0 configurations
+[2026-02-20T10:45:48.999Z] GET /api/step11-products/0a0871a6-a516-42df-9cc7-8065eac3c151
+  -> Found 0 configurations
+[2026-02-20T10:45:49.931Z] GET /api/step11-products/a220e292-cc61-4f8f-988a-8a3287b386b2
+  -> Found 2 configurations
+[2026-02-20T10:46:27.016Z] GET /api/step11-products/5e87dba7-f65b-473f-b8eb-a3154b457533
+  -> Found 1 configurations
+[2026-02-20T10:46:30.812Z] GET /api/step11-products/616c2ade-0474-4a75-bbbb-f8d410a2096b
+  -> Found 2 configurations
+[2026-02-20T10:46:33.724Z] GET /api/step11-products/8bf97e67-3b8b-434d-b61d-569235b98819
+  -> Found 1 configurations
+[2026-02-20T10:46:37.842Z] GET /api/step11-products/7e578f3e-159f-41df-bf17-ef7599660b14
+  -> Found 0 configurations
+[2026-02-20T10:46:40.446Z] GET /api/step11-products/adc172e0-7cab-4102-aa2c-94b909b26970
+  -> Found 0 configurations
+[2026-02-20T10:46:44.283Z] GET /api/step11-products/50ad0858-7ead-452e-b472-b5e3fabbd1e4
+  -> Found 0 configurations
+[2026-02-20T10:46:45.468Z] GET /api/step11-products/d0cff484-1f0f-4d67-9e26-d1cb31222a11
+  -> Found 0 configurations
+[2026-02-20T10:46:47.294Z] GET /api/step11-products/5f02bdcf-882a-4d06-823c-78cb1e5143a2
+  -> Found 0 configurations
+[2026-02-20T10:46:49.135Z] GET /api/step11-products/0a0871a6-a516-42df-9cc7-8065eac3c151
+  -> Found 0 configurations
+[2026-02-20T12:08:11.293Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-20T12:38:56.661Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 3 configurations
+[2026-02-20T12:40:02.703Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 3 configurations
+[2026-02-20T12:44:39.142Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 3 configurations
+[2026-02-20T12:45:31.910Z] GET /api/step11-products/0fd84221-f4cb-4a2b-8ea7-943e8a173a53
+  -> Found 7 configurations
+[2026-02-21T05:42:10.077Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 3 configurations
+[2026-02-21T05:52:03.571Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 3 configurations
+[2026-02-21T05:53:23.358Z] GET /api/step11-products/a8e0c72d-d020-4af3-a894-398f840ea0d2
+  -> Found 4 configurations
+[2026-02-21T10:11:46.188Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:18:10.658Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:18:29.680Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:19:36.636Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:22:53.647Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:23:45.966Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
+[2026-02-21T10:23:54.674Z] GET /api/step11-products/77a57a0f-699c-420b-813e-0fb550ea5710
+  -> Found 1 configurations
