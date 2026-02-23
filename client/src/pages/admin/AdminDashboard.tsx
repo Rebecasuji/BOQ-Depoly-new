@@ -608,6 +608,7 @@ export default function AdminDashboard() {
     vendorCategory: "",
     taxCodeType: undefined,
     taxCodeValue: "",
+    shopId: "",
   });
 
   const handleSelectMasterMaterial = (masterId: string) => {
@@ -633,11 +634,24 @@ export default function AdminDashboard() {
     }
 
     // Determine Shop ID based on role
-    let shopId = "1";
+    let shopId = newMaterial.shopId || "";
+
     if (user?.role === "supplier" && user.shopId) {
       shopId = user.shopId;
-    } else if (user?.role === "purchase_team" && newMaterial.shopId) {
-      shopId = newMaterial.shopId;
+    }
+
+    if (!shopId || shopId === "1") {
+      // If no shop selected and user is admin/purchase_team, default to first available shop or alert
+      if (localShops.length > 0) {
+        shopId = localShops[0].id;
+      } else {
+        toast({
+          title: "Setup Required",
+          description: "Please create at least one shop before adding materials.",
+          variant: "destructive",
+        });
+        return;
+      }
     }
 
     // Mock validation
@@ -653,15 +667,32 @@ export default function AdminDashboard() {
       return;
     }
 
-    const newRequest = {
-      id: Math.random().toString(),
-      material: { ...newMaterial, shopId },
-      submittedBy: user?.name,
-      submittedAt: new Date().toISOString(),
-      status: "pending",
-    };
-
-    setMaterialRequests((prev: any[]) => [...prev, newRequest]);
+    (async () => {
+      try {
+        const result = await submitMaterialForApproval({ ...newMaterial, shopId });
+        if (result) {
+          toast({
+            title: "Success",
+            description: "Material submitted for approval. Software team will review and approve/reject.",
+          });
+          // Refresh pending lists
+          if (typeof refreshPendingApprovals === 'function') await refreshPendingApprovals();
+          if (typeof refreshMaterials === 'function') await refreshMaterials();
+        } else {
+          toast({
+            title: "Local Queue",
+            description: "Server unreachable. Material saved locally and will sync when online.",
+          });
+        }
+      } catch (err) {
+        console.error('handleAddMaterial error', err);
+        toast({
+          title: "Error",
+          description: "Failed to submit material",
+          variant: "destructive",
+        });
+      }
+    })();
 
     toast({
       title: "Success",
@@ -681,6 +712,7 @@ export default function AdminDashboard() {
       brandName: "",
       modelNumber: "",
       technicalSpecification: "",
+      shopId: "",
       dimensions: "",
       finish: "",
       metalType: "",
@@ -691,23 +723,23 @@ export default function AdminDashboard() {
   const handleEditMaterial = (mat: any) => {
     setEditingMaterialId(mat.id);
     setNewMaterial({
-      name: mat.name,
-      code: mat.code,
-      rate: mat.rate,
-      unit: mat.unit,
-      // Handle both snake_case (from database) and camelCase (from UI state)
+      name: mat.name || "",
+      code: mat.code || "",
+      rate: mat.rate || 0,
+      unit: mat.unit || "pcs",
+      // Handle various naming conventions from DB and frontend
       category: mat.category || "",
-      subCategory: mat.subCategory || mat.sub_category || mat.subcategory || "",
+      subCategory: mat.subcategory || mat.sub_category || mat.subCategory || "",
       product: mat.product || "",
-      brandName: mat.brandName || mat.brand_name || mat.brandname || "",
-      modelNumber: mat.modelNumber || mat.model_number || mat.modelnumber || "",
-      technicalSpecification: mat.technicalSpecification || mat.technical_specification || mat.technicalspecification || "",
+      brandName: mat.brandname || mat.brand_name || mat.brandName || "",
+      modelNumber: mat.modelnumber || mat.model_number || mat.modelNumber || "",
+      technicalSpecification: mat.technicalspecification || mat.technical_specification || mat.technicalSpecification || "",
       dimensions: mat.dimensions || "",
-      finish: mat.finish || "",
-      metalType: mat.metalType || mat.metal_type || mat.metaltype || "",
-      shopId: mat.shopId || mat.shop_id || "",
+      finish: mat.finish || mat.finishtype || "",
+      metalType: mat.metaltype || mat.metal_type || mat.metalType || "",
+      // Ensure shopId is a string for the Select component
+      shopId: mat.shop_id ? mat.shop_id.toString() : (mat.shopId ? mat.shopId.toString() : ""),
     });
-    // stay on the dashboard and allow inline editing
   };
 
   const handleUpdateMaterial = async () => {
@@ -720,7 +752,7 @@ export default function AdminDashboard() {
         if (newMaterial.name !== undefined) payload.name = newMaterial.name;
         if (newMaterial.code !== undefined) payload.code = newMaterial.code;
         if (newMaterial.rate !== undefined) payload.rate = newMaterial.rate;
-        if (newMaterial.shopId !== undefined) payload.shop_id = newMaterial.shopId;
+        if (newMaterial.shopId !== undefined) payload.shop_id = newMaterial.shopId === "" ? null : newMaterial.shopId;
         if (newMaterial.unit !== undefined) payload.unit = newMaterial.unit;
         if (newMaterial.category !== undefined) payload.category = newMaterial.category;
         if (newMaterial.brandName !== undefined) payload.brandname = newMaterial.brandName;
@@ -734,9 +766,23 @@ export default function AdminDashboard() {
         const res = await apiFetch(`/materials/${editingMaterialId}`, { method: 'PUT', body: JSON.stringify(payload) });
         if (res.ok) {
           const data = await res.json();
-          const updated = data?.material || data;
-          // update local UI state with server response (prefer server fields)
-          setLocalMaterials((prev: any[]) => prev.map((m: any) => (m.id === editingMaterialId ? { ...m, ...updated } : m)));
+          const updatedRaw = data?.material || data;
+
+          // normalize server material keys (snake_case) to client camelCase
+          const normalized = {
+            ...updatedRaw,
+            shopId: updatedRaw.shop_id || updatedRaw.shopId || null,
+            brandName: updatedRaw.brandname || updatedRaw.brandName || "",
+            modelNumber: updatedRaw.modelnumber || updatedRaw.modelNumber || "",
+            subCategory: updatedRaw.subcategory || updatedRaw.subCategory || "",
+            technicalSpecification: updatedRaw.technicalspecification || updatedRaw.technicalSpecification || "",
+            vendorCategory: updatedRaw.vendor_category || updatedRaw.vendorCategory || "",
+            taxCodeType: updatedRaw.tax_code_type || updatedRaw.taxCodeType || null,
+            taxCodeValue: updatedRaw.tax_code_value || updatedRaw.taxCodeValue || "",
+          };
+
+          // update local UI state with server response
+          setLocalMaterials((prev: any[]) => prev.map((m: any) => (m.id === editingMaterialId ? { ...m, ...normalized } : m)));
         } else {
           // log server error body
           try { const txt = await res.text(); console.warn('[handleUpdateMaterial] server responded non-ok', res.status, txt); } catch { console.warn('[handleUpdateMaterial] server responded non-ok', res.status); }
@@ -1391,7 +1437,7 @@ export default function AdminDashboard() {
                                         </SelectTrigger>
                                         <SelectContent>
                                           {localShops.map((s: any) => (
-                                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                            <SelectItem key={s.id} value={s.id.toString()}>{s.name}</SelectItem>
                                           ))}
                                         </SelectContent>
                                       </Select>
@@ -1414,6 +1460,11 @@ export default function AdminDashboard() {
                                     <div className="text-[10px] text-muted-foreground italic">
                                       Shop: {localShops.find(s => s.id === (mat.shopId || mat.shop_id))?.name || 'Unassigned'}
                                     </div>
+                                    {(mat.technicalSpecification || mat.technicalspecification) && (
+                                      <div className="text-[10px] text-blue-600 mt-1 line-clamp-2 max-w-md">
+                                        Spec: {mat.technicalSpecification || mat.technicalspecification}
+                                      </div>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Button size="sm" variant="ghost" onClick={() => setLocalMaterials((prev: any[]) => prev.map((m: any) => m.id === mat.id ? { ...m, disabled: !m.disabled } : m))}>
@@ -3041,6 +3092,12 @@ export default function AdminDashboard() {
                                   <p className="font-semibold">Brand</p>
                                   <p>{request.material.brandName || request.material.brandname || request.material.brand || request.material.make || '-'}</p>
                                 </div>
+                                {(request.material.technicalSpecification || request.material.technicalspecification) && (
+                                  <div className="col-span-2">
+                                    <p className="font-semibold">Technical Specification</p>
+                                    <p className="text-blue-600 italic text-xs">{request.material.technicalSpecification || request.material.technicalspecification}</p>
+                                  </div>
+                                )}
                               </div>
                             </div>
 

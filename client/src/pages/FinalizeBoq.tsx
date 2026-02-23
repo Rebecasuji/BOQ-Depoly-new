@@ -12,6 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import * as XLSX from 'xlsx';
 // import VersionHistory from "@/components/VersionHistory"; // Not found
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -20,7 +29,17 @@ import { computeBoq, UnitType } from "@/lib/boqCalc";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Trash2, Copy, GripVertical, GripHorizontal } from "lucide-react";
+import { Trash2, Copy, GripVertical, GripHorizontal, Eye, EyeOff } from "lucide-react";
+
+/** Helper to generate Excel-style column names (A, B, C... Z, AA, AB...) */
+const getExcelColumnName = (n: number) => {
+  let name = "";
+  while (n >= 0) {
+    name = String.fromCharCode((n % 26) + 65) + name;
+    n = Math.floor(n / 26) - 1;
+  }
+  return name;
+};
 
 type Project = {
   id: string;
@@ -97,8 +116,8 @@ export default function FinalizeBoq() {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
 
-  // Per-product custom columns: { [boqItemId]: { name: string, isTotal: boolean }[] }
-  const [customColumns, setCustomColumns] = useState<{ [id: string]: { name: string, isTotal: boolean }[] }>({});
+  // Per-product custom columns: { [boqItemId]: { name: string, isTotal: boolean, hideColumn?: boolean, hideTotal?: boolean, isPercentage?: boolean, percentageValue?: number, baseValue?: number, baseSource?: string }[] }
+  const [customColumns, setCustomColumns] = useState<{ [id: string]: any[] }>({});
   // Per-product custom column cell values: { [boqItemId]: { [rowIdx]: { [colName]: string } } }
   const [customColumnValues, setCustomColumnValues] = useState<{ [id: string]: { [rowIdx: number]: { [col: string]: string } } }>({});
   // Selected product IDs for bulk delete
@@ -107,16 +126,117 @@ export default function FinalizeBoq() {
   const [productDescriptions, setProductDescriptions] = useState<{ [id: string]: string }>({});
   // Which product is currently being saved
   const [savingLayoutId, setSavingLayoutId] = useState<string | null>(null);
+  const [showColumnTotals, setShowColumnTotals] = useState(true);
+  const [hideSystemTotalFooter, setHideSystemTotalFooter] = useState(false);
+
+  // Decoupled Global Header State for custom columns
+  const [globalColSettings, setGlobalColSettings] = useState<{ [colName: string]: any }>({});
+
+  // Excel Export State
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [selectedExportCols, setSelectedExportCols] = useState<string[]>([]);
+
+  const handleToggleColumnTotalVisibility = async (colName: string, hide: boolean) => {
+    const updates = boqItems.map(item => {
+      const nextCols = (customColumns[item.id] || []).map(c =>
+        c.name === colName ? { ...c, hideTotal: hide } : c
+      );
+      setCustomColumns(prev => ({ ...prev, [item.id]: nextCols }));
+      return saveItemLayout(item.id, nextCols);
+    });
+    await Promise.all(updates);
+    toast({ title: hide ? "Total Hidden" : "Total Shown", description: `Column total for "${colName}" updated.` });
+  };
+
+  const handleHideColumn = async (colName: string, hide: boolean) => {
+    const updates = boqItems.map(item => {
+      const nextCols = (customColumns[item.id] || []).map(c =>
+        c.name === colName ? { ...c, hideColumn: hide } : c
+      );
+      setCustomColumns(prev => ({ ...prev, [item.id]: nextCols }));
+      return saveItemLayout(item.id, nextCols);
+    });
+    await Promise.all(updates);
+    toast({ title: hide ? "Column Hidden" : "Column Restored", description: `Column "${colName}" visibility updated.` });
+  };
+
+  const handleSetSystemTotalVisibility = async (visible: boolean) => {
+    setHideSystemTotalFooter(!visible);
+    // Persist this flag to all items in current version
+    const updates = boqItems.map(item => {
+      let td = item.table_data || {};
+      if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
+      const updatedTd = { ...td, finalize_hide_system_total: !visible };
+      return apiFetch(`/api/boq-items/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table_data: updatedTd }),
+      });
+    });
+    await Promise.all(updates);
+    toast({
+      title: visible ? "System Total Restored" : "System Total Hidden",
+      description: visible ? "Reference value is now visible." : "Reference value removed from footer."
+    });
+  };
 
   const allCols = React.useMemo(() => {
-    const cols: { name: string, isTotal: boolean, isPercentage?: boolean, percentageValue?: number, baseValue?: number, baseSource?: string }[] = [];
+    const cols: { name: string, isTotal: boolean, isPercentage?: boolean, percentageValue?: number, baseValue?: number, baseSource?: string, hideTotal?: boolean, hideColumn?: boolean }[] = [];
     boqItems.forEach(item => {
       (customColumns[item.id] || []).forEach(col => {
         if (!cols.find(c => c.name === col.name)) cols.push(col);
       });
     });
-    return cols;
+    return cols.filter(c => !c.hideColumn);
   }, [boqItems, customColumns]);
+
+  const hiddenCols = React.useMemo(() => {
+    const hidden: string[] = [];
+    boqItems.forEach(item => {
+      (customColumns[item.id] || []).forEach(col => {
+        if (col.hideColumn && !hidden.includes(col.name)) {
+          hidden.push(col.name);
+        }
+      });
+    });
+    return hidden;
+  }, [boqItems, customColumns]);
+
+  const calculatedColumnTotals = React.useMemo(() => {
+    let totals = allCols.map(() => 0);
+    let totalValueSum = 0;
+
+    boqItems.forEach(item => {
+      let td = item.table_data || {};
+      if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
+
+      let itemTotal = 0;
+      if (td.materialLines && td.targetRequiredQty !== undefined) {
+        itemTotal = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty).grandTotal;
+      } else {
+        const step11Items = Array.isArray(td.step11_items) ? td.step11_items : [];
+        itemTotal = step11Items.reduce((s: number, it: any) =>
+          s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
+      }
+      totalValueSum += itemTotal;
+
+      let currentItemRunningTotal = itemTotal;
+      let accumulator = 0;
+      allCols.forEach((col, idx) => {
+        if (col.isTotal) {
+          currentItemRunningTotal += accumulator;
+          accumulator = 0;
+          totals[idx] += currentItemRunningTotal;
+        } else {
+          const val = parseFloat(customColumnValues[item.id]?.[0]?.[col.name] || "0") || 0;
+          accumulator += val;
+          totals[idx] += val;
+        }
+      });
+    });
+
+    return { totals, totalValueSum };
+  }, [boqItems, allCols, customColumnValues]);
 
   const handleColumnReorder = async (newOrder: typeof allCols) => {
     // Optimistically update local state for all items
@@ -307,16 +427,21 @@ export default function FinalizeBoq() {
             setBoqItems(items);
 
             // --- Restore finalize layout from saved table_data ---
-            const restoredCols: { [id: string]: { name: string, isTotal: boolean }[] } = {};
+            const restoredCols: { [id: string]: { name: string, isTotal: boolean, hideTotal?: boolean }[] } = {};
             const restoredVals: { [id: string]: { [rowIdx: number]: { [col: string]: string } } } = {};
             const restoredDescs: { [id: string]: string } = {};
+            let sysTotalHidden = false;
+
             for (const item of items) {
               let td = item.table_data || {};
               if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
+
+              if (td.finalize_hide_system_total) sysTotalHidden = true;
+
               if (Array.isArray(td.finalize_columns) && td.finalize_columns.length > 0) {
                 // Backward compatibility: convert string arrays to objects
                 restoredCols[item.id] = td.finalize_columns.map((c: any) =>
-                  typeof c === "string" ? { name: c, isTotal: false } : c
+                  typeof c === "string" ? { name: c, isTotal: false, hideTotal: false } : c
                 );
               }
               if (td.finalize_column_values && typeof td.finalize_column_values === "object") {
@@ -326,9 +451,25 @@ export default function FinalizeBoq() {
                 restoredDescs[item.id] = td.finalize_description;
               }
             }
-            if (Object.keys(restoredCols).length > 0) setCustomColumns(restoredCols);
+            if (Object.keys(restoredCols).length > 0) {
+              setCustomColumns(restoredCols);
+              // Also initialize global settings from the first item that has custom columns
+              const firstItemId = Object.keys(restoredCols)[0];
+              if (firstItemId) {
+                const initialGlobal: any = {};
+                restoredCols[firstItemId].forEach((col: any) => {
+                  initialGlobal[col.name] = {
+                    baseValue: col.baseValue,
+                    percentageValue: col.percentageValue,
+                    baseSource: col.baseSource
+                  };
+                });
+                setGlobalColSettings(initialGlobal);
+              }
+            }
             if (Object.keys(restoredVals).length > 0) setCustomColumnValues(restoredVals);
             if (Object.keys(restoredDescs).length > 0) setProductDescriptions(restoredDescs);
+            setHideSystemTotalFooter(sysTotalHidden);
           } catch (e) {
             toast({ title: "Error", description: "Failed to parse BOM items response", variant: "destructive" });
             console.error("BOM items parse error:", e);
@@ -498,6 +639,7 @@ export default function FinalizeBoq() {
         finalize_columns: updatedCols !== undefined ? updatedCols : (customColumns[boqItemId] || []),
         finalize_column_values: updatedVals !== undefined ? updatedVals : (customColumnValues[boqItemId] || {}),
         finalize_description: updatedDesc !== undefined ? updatedDesc : (productDescriptions[boqItemId] ?? ""),
+        finalize_hide_system_total: hideSystemTotalFooter,
       };
 
       const resp = await apiFetch(`/api/boq-items/${boqItemId}`, {
@@ -565,12 +707,28 @@ export default function FinalizeBoq() {
   };
 
   const handleGlobalCalculation = async (colName: string, base: number, pct: number, baseSource: string = "manual") => {
+    const oldSettings = globalColSettings[colName] || {};
+    const oldPct = oldSettings.percentageValue || 0;
+    const deltaPct = pct - oldPct;
+
+    // Update the decoupled global state immediately
+    setGlobalColSettings(prev => ({
+      ...prev,
+      [colName]: { baseValue: base, percentageValue: pct, baseSource }
+    }));
+
     const nextColsMap: any = {};
     const nextValsMap: any = {};
 
     boqItems.forEach(item => {
-      let rowBase = base;
+      let itemCols = customColumns[item.id] || [];
+      let itemCol = itemCols.find(c => c.name === colName);
 
+      // If we are adjusting pct, apply delta to whatever the row currently has
+      const currentRowPct = itemCol?.percentageValue || oldPct;
+      const newRowPct = currentRowPct + deltaPct;
+
+      let rowBase = base;
       if (baseSource !== "manual") {
         if (baseSource === "Total Value (₹)") {
           let td = item.table_data || {};
@@ -584,19 +742,17 @@ export default function FinalizeBoq() {
               s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
           }
         } else {
-          // Look up value from another custom column in the same row
           const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
           rowBase = parseFloat(valStr) || 0;
         }
       }
 
-      const itemCols = (customColumns[item.id] || []).map(c =>
-        c.name === colName ? { ...c, baseValue: base, percentageValue: pct, baseSource } : c
+      const updatedCols = itemCols.map(c =>
+        c.name === colName ? { ...c, baseValue: base, percentageValue: newRowPct, baseSource } : c
       );
-      nextColsMap[item.id] = itemCols;
+      nextColsMap[item.id] = updatedCols;
 
-      const calculated = (pct / 100) * rowBase;
-
+      const calculated = (newRowPct / 100) * rowBase;
       const itemVals = { ...(customColumnValues[item.id] || {}) };
       itemVals[0] = { ...(itemVals[0] || {}), [colName]: calculated.toFixed(2) };
       nextValsMap[item.id] = itemVals;
@@ -608,6 +764,48 @@ export default function FinalizeBoq() {
     await Promise.all(boqItems.map(item =>
       saveItemLayout(item.id, nextColsMap[item.id], nextValsMap[item.id])
     ));
+  };
+
+  const handleItemCalculation = async (boqItemId: string, colName: string, pct: number) => {
+    const item = boqItems.find(i => i.id === boqItemId);
+    if (!item) return;
+
+    let itemCols = customColumns[item.id] || [];
+    let itemCol = itemCols.find(c => c.name === colName);
+    if (!itemCol) return;
+
+    let rowBase = itemCol.baseValue || 0;
+    const baseSource = itemCol.baseSource || "manual";
+
+    if (baseSource !== "manual") {
+      if (baseSource === "Total Value (₹)") {
+        let td = item.table_data || {};
+        if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
+        if (td.materialLines && td.targetRequiredQty !== undefined) {
+          rowBase = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty).grandTotal;
+        } else {
+          const step11Items: Step11Item[] = Array.isArray(td.step11_items) ? td.step11_items : [];
+          rowBase = step11Items.reduce((s: number, it: any) =>
+            s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
+        }
+      } else {
+        const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
+        rowBase = parseFloat(valStr) || 0;
+      }
+    }
+
+    const calculated = (pct / 100) * rowBase;
+    const nextCols = itemCols.map(c =>
+      c.name === colName ? { ...c, percentageValue: pct } : c
+    );
+
+    const itemVals = { ...(customColumnValues[item.id] || {}) };
+    itemVals[0] = { ...(itemVals[0] || {}), [colName]: calculated.toFixed(2) };
+
+    setCustomColumns(prev => ({ ...prev, [item.id]: nextCols }));
+    setCustomColumnValues(prev => ({ ...prev, [item.id]: itemVals }));
+
+    await saveItemLayout(item.id, nextCols, itemVals);
   };
 
   const getEditedValue = (
@@ -806,28 +1004,40 @@ export default function FinalizeBoq() {
       return;
     }
 
+    // Identify ALL potential columns first to populate selection list
+    const potentialCols = [
+      "S.No",
+      "Product / Material",
+      "Description / Location",
+      ...allCols.map(c => c.name),
+      "Rate / Unit",
+      "Total Value (₹)"
+    ];
+
+    setSelectedExportCols(potentialCols);
+    setIsExportDialogOpen(true);
+  };
+
+  const performExcelExport = () => {
     try {
-      // 1. Identify all custom columns
-      const allCols: { name: string, isTotal: boolean }[] = [];
-      boqItems.forEach(item => {
-        (customColumns[item.id] || []).forEach(col => {
-          if (!allCols.find(c => c.name === col.name)) allCols.push(col);
-        });
+      if (selectedExportCols.length === 0) {
+        toast({ title: "Warning", description: "Please select at least one column" });
+        return;
+      }
+
+      // Preparation of data for sheet-level accuracy
+      const sheetData: any[] = [];
+
+      // Add project info at the top if needed, or just headers
+      // Map headers to include percentages if applicable
+      const headers = selectedExportCols.map(colName => {
+        const settings = globalColSettings[colName];
+        if (settings?.percentageValue) {
+          return `${colName} (${settings.percentageValue}%)`;
+        }
+        return colName;
       });
-
-      // 2. Prepare Headers
-      const headers = [
-        "#",
-        "Product / Material",
-        "Description / Location",
-        "Rate / Unit",
-        "Total Value (₹)",
-        ...allCols.map(c => c.name)
-      ];
-
-      // 3. Prepare Rows
-      const rows: string[][] = [];
-      let grandTotalValue = 0;
+      sheetData.push(headers);
 
       boqItems.forEach((boqItem, boqIdx) => {
         let tableData = boqItem.table_data || {};
@@ -837,7 +1047,6 @@ export default function FinalizeBoq() {
         const productName = tableData.product_name || boqItem.estimator || "—";
         const category = tableData.category || "";
 
-        // Totals
         let totalVal = 0;
         let rateSqft = 0;
         if (tableData.materialLines && tableData.targetRequiredQty !== undefined) {
@@ -854,58 +1063,70 @@ export default function FinalizeBoq() {
           tableData.subcategory || step11Items[0]?.description || category || ""
         );
 
-        grandTotalValue += totalVal;
-
-        // Custom column values for this row
-        const customVals: string[] = [];
-        let runningTotal = totalVal;
-        let accumulator = 0;
-        allCols.forEach(col => {
-          if (col.isTotal) {
-            runningTotal += accumulator;
-            accumulator = 0;
-            customVals.push(runningTotal.toFixed(2));
-          } else {
-            const val = customColumnValues[boqItem.id]?.[0]?.[col.name] || "0";
-            accumulator += parseFloat(val) || 0;
-            customVals.push(val);
+        const row: any[] = [];
+        selectedExportCols.forEach(colName => {
+          if (colName === "S.No") row.push(boqIdx + 1);
+          else if (colName === "Product / Material") row.push(productName);
+          else if (colName === "Description / Location") row.push(manualDesc);
+          else if (colName === "Rate / Unit") row.push(Number(rateSqft.toFixed(2)));
+          else if (colName === "Total Value (₹)") row.push(Number(totalVal.toFixed(2)));
+          else {
+            // It's a custom column
+            const currentCol = allCols.find(c => c.name === colName);
+            if (currentCol?.isTotal) {
+              // Calculate running total for this custom column
+              let runningTotal = totalVal;
+              let accumulator = 0;
+              // We need to recreate the cumulative logic here
+              const itemCols = customColumns[boqItem.id] || [];
+              for (const c of itemCols) {
+                if (c.name === colName) {
+                  runningTotal += accumulator;
+                  break;
+                }
+                const val = parseFloat(customColumnValues[boqItem.id]?.[0]?.[c.name] || "0") || 0;
+                accumulator += val;
+              }
+              row.push(Number(runningTotal.toFixed(2)));
+            } else {
+              const valStr = customColumnValues[boqItem.id]?.[0]?.[colName] || "0";
+              const numVal = parseFloat(valStr) || 0;
+              // If it's a percentage based column, maybe we want to show percent?
+              // The user said "even with the percentages etc". 
+              // Usually they mean they want the values to be accurate.
+              row.push(Number(numVal.toFixed(2)));
+            }
           }
         });
-
-        rows.push([
-          (boqIdx + 1).toString(),
-          productName,
-          manualDesc,
-          rateSqft.toFixed(2),
-          totalVal.toFixed(2),
-          ...customVals
-        ]);
+        sheetData.push(row);
       });
 
-      // 4. Create CSV
-      const csvContent = [
-        headers.join(","),
-        ...rows.map(row => row.map(cell => {
-          const escaped = String(cell).replace(/"/g, '""');
-          return `"${escaped}"`;
-        }).join(","))
-      ].join("\n");
+      // Add Grand Totals footer row if columns are numeric
+      const footerRow: any[] = Array(selectedExportCols.length).fill("");
+      selectedExportCols.forEach((colName, idx) => {
+        if (colName === "Product / Material") footerRow[idx] = "GRAND TOTAL";
+        else if (colName === "Total Value (₹)") {
+          footerRow[idx] = Number(calculatedColumnTotals.totalValueSum.toFixed(2));
+        } else if (allCols.some(c => c.name === colName)) {
+          const colIdx = allCols.findIndex(c => c.name === colName);
+          footerRow[idx] = Number(calculatedColumnTotals.totals[colIdx].toFixed(2));
+        }
+      });
+      sheetData.push(footerRow);
 
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      const filename = `${selectedProject?.name || "BOM"}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}.csv`;
+      // Simple Worksheet creation
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "BOQ");
 
-      link.setAttribute("href", url);
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const filename = `${selectedProject?.name || "BOQ"}_Excel_Export.xlsx`;
+      XLSX.writeFile(wb, filename);
 
+      setIsExportDialogOpen(false);
       toast({ title: "Success", description: `Downloaded ${filename}` });
     } catch (error) {
       console.error("Excel download failed:", error);
-      toast({ title: "Error", description: "Failed to download CSV", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to download Excel", variant: "destructive" });
     }
   };
 
@@ -1213,37 +1434,48 @@ export default function FinalizeBoq() {
                     )}
                   </div>
                   {selectedVersion && (
-                    <div className="text-sm text-gray-600 space-y-1 bg-blue-50 p-3 rounded">
-                      <div>
-                        <strong>Project:</strong>{" "}
-                        {selectedVersion.project_name || "Unknown"}
-                      </div>
-                      <div>
-                        <strong>Version:</strong> V
-                        {selectedVersion.version_number}
-                      </div>
-                      {selectedVersion.project_client && (
+                    <div className="space-y-4">
+                      <div className="text-sm text-gray-600 space-y-1 bg-blue-50 p-3 rounded">
                         <div>
-                          <strong>Client:</strong>{" "}
-                          {selectedVersion.project_client}
+                          <strong>Project:</strong>{" "}
+                          {selectedVersion.project_name || "Unknown"}
                         </div>
-                      )}
-                      {selectedVersion.project_location && (
                         <div>
-                          <strong>Location:</strong>{" "}
-                          {selectedVersion.project_location}
+                          <strong>Version:</strong> V
+                          {selectedVersion.version_number}
                         </div>
-                      )}
-                      {isVersionSubmitted && (
-                        <span className="inline-block bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold">
-                          Submitted (Locked)
-                        </span>
-                      )}
-                      {!isVersionSubmitted && (
-                        <span className="inline-block bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold">
-                          Draft (Editable)
-                        </span>
-                      )}
+                        {selectedVersion.project_client && (
+                          <div>
+                            <strong>Client:</strong>{" "}
+                            {selectedVersion.project_client}
+                          </div>
+                        )}
+                        {selectedVersion.project_location && (
+                          <div>
+                            <strong>Location:</strong>{" "}
+                            {selectedVersion.project_location}
+                          </div>
+                        )}
+                        {isVersionSubmitted && (
+                          <span className="inline-block bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-semibold">
+                            Submitted (Locked)
+                          </span>
+                        )}
+                        {!isVersionSubmitted && (
+                          <span className="inline-block bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold">
+                            Draft (Editable)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-4 bg-white/50 p-2 rounded border border-blue-100">
+                        <Button variant="outline" size="sm" onClick={handleDownloadExcel} className="border-green-600 text-green-700 hover:bg-green-50">
+                          Download as Excel
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={handleDownloadPdf} className="border-red-600 text-red-700 hover:bg-red-50">
+                          Download as PDF
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1253,6 +1485,46 @@ export default function FinalizeBoq() {
             )}
           </CardContent>
         </Card>
+
+        {/* Excel Export Dialog */}
+        <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Select Columns for Excel Export</DialogTitle>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-4 py-4">
+              {[
+                "S.No",
+                "Product / Material",
+                "Description / Location",
+                "Rate / Unit",
+                "Total Value (₹)",
+                ...allCols.map(c => c.name)
+              ].map(col => (
+                <div key={col} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`col-${col}`}
+                    checked={selectedExportCols.includes(col)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedExportCols(prev => [...prev, col]);
+                      } else {
+                        setSelectedExportCols(prev => prev.filter(c => c !== col));
+                      }
+                    }}
+                  />
+                  <Label htmlFor={`col-${col}`} className="text-sm font-medium leading-none cursor-pointer">
+                    {col}
+                  </Label>
+                </div>
+              ))}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
+              <Button className="bg-green-600 hover:bg-green-700" onClick={performExcelExport}>Download Excel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {/* BOM Items Section — one card+table per product */}
         {selectedProjectId && (
           <div className="space-y-4">
@@ -1339,6 +1611,32 @@ export default function FinalizeBoq() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className={`h-9 px-4 text-[12px] font-bold uppercase transition-all shadow-sm ${showColumnTotals ? "border-orange-300 text-orange-700 hover:bg-orange-50" : "border-gray-300 text-gray-500 hover:bg-gray-100"}`}
+                      onClick={() => setShowColumnTotals(!showColumnTotals)}
+                    >
+                      {showColumnTotals ? "Hide Totals Row" : "Show Totals Row"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 px-4 text-[12px] font-bold uppercase border-yellow-300 text-yellow-700 hover:bg-yellow-50 hover:border-yellow-400 transition-all shadow-sm"
+                      onClick={async () => {
+                        if (!confirm("Restoring all hidden totals and columns for all lines?")) return;
+                        setHideSystemTotalFooter(false);
+                        const updates = boqItems.map(item => {
+                          const nextCols = (customColumns[item.id] || []).map(c => ({ ...c, hideTotal: false, hideColumn: false }));
+                          setCustomColumns(prev => ({ ...prev, [item.id]: nextCols }));
+                          return saveItemLayout(item.id, nextCols);
+                        });
+                        await Promise.all(updates);
+                        toast({ title: "Visibility Restored", description: "All hidden columns and totals are now visible." });
+                      }}
+                    >
+                      🔄 Reset All Visibility
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="h-9 px-4 text-[12px] font-bold uppercase border-green-300 text-green-700 hover:bg-green-100/80 hover:border-green-400 transition-all shadow-sm"
                       onClick={async () => {
                         const updates = boqItems.map(item => saveItemLayout(item.id));
@@ -1371,9 +1669,40 @@ export default function FinalizeBoq() {
                   </div>
                 )}
 
+                {!isVersionSubmitted && hiddenCols.length > 0 && (
+                  <div className="flex items-center gap-2 p-3 bg-orange-50/50 border-b border-orange-100 overflow-x-auto whitespace-nowrap scrollbar-hide">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-orange-600 mr-2 flex-shrink-0">Hidden Columns:</span>
+                    {hiddenCols.map(colName => (
+                      <button
+                        key={colName}
+                        onClick={() => handleHideColumn(colName, false)}
+                        className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-orange-200 rounded-full text-[11px] font-bold text-orange-700 hover:bg-orange-100 hover:border-orange-300 transition-all shadow-sm group"
+                      >
+                        <Eye size={12} className="text-orange-400 group-hover:text-orange-600" />
+                        {colName}
+                        <span className="text-[9px] opacity-70 ml-1">Restore</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="overflow-x-auto">
                   <table className="border-collapse text-sm min-w-full">
                     <thead>
+                      {/* Excel-style Column Labels */}
+                      <tr className="bg-gray-200/50 border-b border-gray-300 text-[10px] font-bold text-gray-500 shadow-inner">
+                        <th className="border-r py-1 w-10 text-center">A</th>
+                        <th className="border-r py-1 w-12 text-center text-blue-600">B</th>
+                        <th className="border-r py-1 text-center font-extrabold">C</th>
+                        <th className="border-r py-1 text-center">D</th>
+                        <th className="border-r py-1 text-center font-bold">E</th>
+                        <th className="border-r py-1 text-center text-green-700">F</th>
+                        {allCols.map((_, idx) => (
+                          <th key={idx} className="border-r py-1 text-center text-purple-700">
+                            {getExcelColumnName(idx + 6)}
+                          </th>
+                        ))}
+                      </tr>
                       <tr className="bg-gray-100/80 border-b border-gray-200 text-[12px] font-black text-gray-700 uppercase tracking-widest shadow-sm">
                         <th className="border-r px-2 py-4 text-center w-10">
                           <GripVertical size={16} className="mx-auto text-gray-400" />
@@ -1433,6 +1762,13 @@ export default function FinalizeBoq() {
                                         <Copy size={12} />
                                       </button>
                                       <button
+                                        onClick={() => handleHideColumn(col.name, true)}
+                                        title="Hide Column"
+                                        className="text-gray-400 hover:text-orange-600 transition-colors"
+                                      >
+                                        <EyeOff size={12} />
+                                      </button>
+                                      <button
                                         onClick={async () => {
                                           if (!confirm(`Delete column "${col.name}" from ALL products?`)) return;
                                           const updates = boqItems.map(item => {
@@ -1460,16 +1796,16 @@ export default function FinalizeBoq() {
                                   )}
                                 </div>
                                 {(col as any).isPercentage && !isVersionSubmitted && (
-                                  <div className="flex items-center gap-2 mt-2 border-t border-purple-200/60 pt-2 pb-1">
-                                    <div className="flex flex-col gap-1 flex-1 min-w-0">
+                                  <div className="mt-2 pt-2 border-t border-purple-200/60 flex flex-col gap-2">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-[8px] font-black text-purple-400 uppercase tracking-widest">Base Source:</span>
                                       <select
-                                        className="bg-transparent text-[9px] font-black text-purple-600 uppercase tracking-tight outline-none cursor-pointer hover:bg-purple-100/50 rounded px-1 -ml-1 transition-colors w-full truncate mb-0.5"
-                                        style={{ appearance: 'none' }}
-                                        value={(col as any).baseSource || "manual"}
+                                        className="bg-purple-100/50 text-[9px] font-black text-purple-700 uppercase px-1.5 py-0.5 rounded border border-purple-200 outline-none cursor-pointer hover:bg-purple-200/50 transition-colors"
+                                        value={globalColSettings[col.name]?.baseSource || "manual"}
                                         onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => {
                                           const newSource = e.target.value;
-                                          handleGlobalCalculation(col.name, (col as any).baseValue || 0, (col as any).percentageValue || 0, newSource);
+                                          handleGlobalCalculation(col.name, globalColSettings[col.name]?.baseValue || 0, globalColSettings[col.name]?.percentageValue || 0, newSource);
                                         }}
                                       >
                                         <option value="manual">Fixed Value</option>
@@ -1478,45 +1814,51 @@ export default function FinalizeBoq() {
                                           <option key={c.name} value={c.name}>{c.name}</option>
                                         ))}
                                       </select>
-                                      {((col as any).baseSource || "manual") === "manual" ? (
-                                        <input
-                                          type="number"
-                                          placeholder="Base"
-                                          className="w-full h-7 bg-white border border-purple-200 rounded px-2 text-[11px] font-bold text-gray-800 outline-none focus:ring-2 ring-purple-400/50 text-right shadow-sm transition-shadow"
-                                          value={(col as any).baseValue || ""}
-                                          onClick={(e) => e.stopPropagation()}
-                                          onChange={async (e) => {
-                                            const newBase = parseFloat(e.target.value) || 0;
-                                            const currentPct = (col as any).percentageValue || 0;
-                                            handleGlobalCalculation(col.name, newBase, currentPct, "manual");
-                                          }}
-                                        />
-                                      ) : (
-                                        <div className="w-full h-7 bg-purple-50 border border-purple-200 rounded px-2 text-[10px] font-bold text-purple-700 flex items-center justify-end shadow-inner truncate transition-all overflow-hidden whitespace-nowrap">
-                                          {(col as any).baseSource === "Total Value (₹)" ? "Total ₹" : (col as any).baseSource}
-                                        </div>
-                                      )}
                                     </div>
-                                    <div className="flex flex-col items-center justify-center pt-4">
-                                      <span className="text-[12px] text-purple-500 font-black">×</span>
-                                    </div>
-                                    <div className="flex flex-col gap-1 w-14">
-                                      <span className="text-[9px] font-black text-purple-500 uppercase tracking-tight text-center invisible leading-none">%</span>
-                                      <div className="flex items-center gap-0.5 mt-0.5">
+
+                                    <div className="flex items-center gap-1.5 bg-purple-50/50 p-1.5 rounded-md border border-purple-100 shadow-inner">
+                                      <div className="flex-1 min-w-0">
+                                        {((col as any).baseSource || "manual") === "manual" ? (
+                                          <input
+                                            type="number"
+                                            placeholder="Base ₹"
+                                            className="w-full h-7 bg-white border border-purple-200 rounded px-2 text-[11px] font-black text-gray-800 outline-none focus:ring-2 ring-purple-400/50 text-right shadow-sm transition-shadow"
+                                            value={globalColSettings[col.name]?.baseValue || ""}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={async (e) => {
+                                              const newBase = parseFloat(e.target.value) || 0;
+                                              const currentPct = globalColSettings[col.name]?.percentageValue || 0;
+                                              const currentSource = globalColSettings[col.name]?.baseSource || "manual";
+                                              handleGlobalCalculation(col.name, newBase, currentPct, currentSource);
+                                            }}
+                                          />
+                                        ) : (
+                                          <div className="h-7 px-2 bg-gradient-to-r from-purple-600 to-indigo-600 rounded flex items-center justify-center shadow-sm">
+                                            <span className="text-[9px] font-black text-white uppercase truncate flex items-center gap-1">
+                                              <span className="opacity-70 text-[8px]">on</span>
+                                              {(col as any).baseSource === "Total Value (₹)" ? "Total Value" : (col as any).baseSource}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <span className="text-[10px] text-purple-400 font-black">×</span>
+
+                                      <div className="flex items-center gap-1.5 w-20 flex-shrink-0">
                                         <input
                                           type="number"
                                           placeholder="%"
-                                          className="w-10 h-7 bg-white border border-purple-200 rounded px-1.5 text-[11px] font-bold text-purple-700 outline-none focus:ring-2 ring-purple-400/50 text-right shadow-sm transition-shadow"
-                                          value={(col as any).percentageValue || ""}
+                                          className="w-14 h-9 bg-white border-2 border-purple-300 rounded-md px-2 text-[13px] font-black text-purple-700 outline-none focus:ring-2 ring-purple-400/50 text-right shadow-sm transition-all"
+                                          value={globalColSettings[col.name]?.percentageValue || ""}
                                           onClick={(e) => e.stopPropagation()}
                                           onChange={async (e) => {
                                             const newPct = parseFloat(e.target.value) || 0;
-                                            const currentBase = (col as any).baseValue || 0;
-                                            const currentSource = (col as any).baseSource || "manual";
+                                            const currentBase = globalColSettings[col.name]?.baseValue || 0;
+                                            const currentSource = globalColSettings[col.name]?.baseSource || "manual";
                                             handleGlobalCalculation(col.name, currentBase, newPct, currentSource);
                                           }}
                                         />
-                                        <span className="text-[11px] text-purple-600 font-extrabold">%</span>
+                                        <span className="text-[13px] text-purple-600 font-black">%</span>
                                       </div>
                                     </div>
                                   </div>
@@ -1595,12 +1937,15 @@ export default function FinalizeBoq() {
                             as="tr"
                             className={`hover:bg-blue-50/40 cursor-default transition-colors border-b border-gray-100 ${isSelected ? "bg-blue-50/60" : "bg-white"}`}
                           >
-                            <td className="border-r px-2 py-3 text-center">
-                              <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-blue-400 transition-colors">
-                                <GripVertical size={16} className="mx-auto" />
+                            <td className="border-r px-2 py-3 text-center bg-gray-50/50 align-middle">
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-[10px] font-bold text-gray-500">{boqIdx + 1}</span>
+                                <div className="cursor-grab active:cursor-grabbing text-gray-300 hover:text-blue-400 transition-colors flex items-center justify-center">
+                                  <GripVertical size={14} className="mx-auto" />
+                                </div>
                               </div>
                             </td>
-                            <td className="border-r px-3 py-3 text-center">
+                            <td className="border-r px-3 py-3 text-center align-middle">
                               <div className="flex flex-col items-center gap-2">
                                 <input
                                   type="checkbox"
@@ -1615,28 +1960,29 @@ export default function FinalizeBoq() {
                                   }}
                                   className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
                                 />
-                                <span className="text-[10px] text-gray-400 font-bold">{boqIdx + 1}</span>
                               </div>
                             </td>
-                            <td className="border-r px-3 py-3">
-                              <div className="font-bold text-gray-800 text-sm">{productName}</div>
-                              {category && <div className="text-[9px] text-blue-500 font-black uppercase tracking-tighter mt-0.5">{category}</div>}
+                            <td className="border-r px-3 py-3 font-medium text-gray-800 text-sm align-middle">
+                              <div className="flex flex-col gap-0.5">
+                                <div className="font-bold">{productName}</div>
+                                {category && <div className="text-[9px] text-blue-500 font-extrabold uppercase tracking-tight">{category}</div>}
+                              </div>
                             </td>
-                            <td className="border-r px-3 py-2">
+                            <td className="border-r px-3 py-2 align-middle">
                               <textarea
                                 value={manualDesc}
                                 disabled={isVersionSubmitted}
                                 onChange={e => setProductDescriptions(prev => ({ ...prev, [boqItem.id]: e.target.value }))}
                                 onBlur={() => saveItemLayout(boqItem.id, undefined, undefined, productDescriptions[boqItem.id])}
                                 rows={2}
-                                className="w-full border-none rounded p-1 text-xs focus:ring-1 ring-blue-300 outline-none bg-transparent resize-y min-h-[40px] leading-tight"
+                                className="w-full border-none rounded p-1.5 text-xs focus:ring-1 ring-blue-300 outline-none bg-transparent resize-y min-h-[45px] leading-tight"
                                 placeholder="Manual description..."
                               />
                             </td>
-                            <td className="border-r px-4 py-3 text-right font-black text-gray-500">
+                            <td className="border-r px-4 py-3 text-right font-black text-gray-500 align-middle">
                               ₹{rateSqft.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className="border-r px-4 py-3 text-right font-black text-green-700 bg-green-50/20">
+                            <td className="border-r px-4 py-3 text-right font-black text-green-700 bg-green-50/20 align-middle">
                               ₹{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                             {/* Custom columns */}
@@ -1655,11 +2001,37 @@ export default function FinalizeBoq() {
                                 } else {
                                   const val = customColumnValues[boqItem.id]?.[0]?.[col.name] || "";
                                   accumulator += parseFloat(val) || 0;
+
+                                  const itemColList = customColumns[boqItem.id] || [];
+                                  const itemCol = itemColList.find((c: any) => c.name === col.name) || col;
+                                  const isCalculated = (itemCol as any).isPercentage && (itemCol as any).baseSource && (itemCol as any).baseSource !== "manual";
+                                  const itemPct = (itemCol as any).percentageValue || 0;
+
                                   return (
-                                    <td key={`${col.name}-${idx}`} className="border-r px-3 py-2 bg-purple-50/10">
+                                    <td key={`${col.name}-${idx}`} className="border-r px-3 py-2 bg-purple-50/10 relative group/cell align-middle">
+                                      {isCalculated && (
+                                        <div className="absolute left-1 top-1 flex flex-col gap-0.5 z-10 pointer-events-none group-hover/cell:pointer-events-auto">
+                                          <div className="flex items-center gap-1.5 opacity-0 group-hover/cell:opacity-100 focus-within:opacity-100 transition-opacity bg-white/90 p-1 rounded-md shadow-sm border border-purple-100">
+                                            <input
+                                              type="number"
+                                              className="w-14 h-8 bg-white border-2 border-purple-400 rounded-md px-1.5 text-[12px] font-black text-purple-800 outline-none text-right shadow-sm focus:ring-2 ring-purple-600/30"
+                                              value={itemPct}
+                                              disabled={isVersionSubmitted}
+                                              onChange={(e) => {
+                                                const newPct = parseFloat(e.target.value) || 0;
+                                                handleItemCalculation(boqItem.id, col.name, newPct);
+                                              }}
+                                            />
+                                            <span className="text-[10px] font-black text-purple-600 uppercase tracking-widest">%</span>
+                                          </div>
+                                          <span className="text-[8px] px-1.5 py-0.5 bg-purple-600 text-white rounded font-black uppercase tracking-wider truncate max-w-[80px] shadow-sm">
+                                            {(itemCol as any).baseSource === "Total Value (₹)" ? "TOTAL" : (itemCol as any).baseSource}
+                                          </span>
+                                        </div>
+                                      )}
                                       <input
                                         type="number"
-                                        disabled={isVersionSubmitted}
+                                        disabled={isVersionSubmitted || isCalculated}
                                         value={val}
                                         onChange={e => setCustomColumnValues(prev => ({
                                           ...prev,
@@ -1669,7 +2041,7 @@ export default function FinalizeBoq() {
                                           }
                                         }))}
                                         onBlur={() => saveItemLayout(boqItem.id)}
-                                        className="w-full border-transparent hover:border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 ring-purple-400 outline-none bg-transparent text-right font-bold text-purple-700"
+                                        className={`w-full h-12 border-transparent rounded px-2 py-1 text-[13px] outline-none bg-transparent text-right font-black ${isCalculated ? "text-indigo-700" : "text-purple-800 focus:ring-1 ring-purple-400 hover:border-gray-200"}`}
                                         placeholder="0.00"
                                       />
                                     </td>
@@ -1681,27 +2053,92 @@ export default function FinalizeBoq() {
                         );
                       })}
                     </Reorder.Group>
+                    {showColumnTotals && (
+                      <tfoot>
+                        <tr className="bg-gray-50 border-t-2 border-gray-300 font-bold group">
+                          <td className="border-r bg-gray-100/50"></td>
+                          <td className="border-r text-center text-xs text-gray-400 bg-gray-100/50">∑</td>
+                          <td className="border-r px-3 py-3 font-bold text-gray-800 relative">
+                            COLUMN TOTALS
+                            <button
+                              onClick={() => setShowColumnTotals(false)}
+                              className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600"
+                              title="Hide Column Totals"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </td>
+                          <td className="border-r"></td>
+                          <td className="border-r"></td>
+                          <td className="border-r px-4 py-3 text-right font-black text-green-700 bg-green-50/30 group/total relative">
+                            {!hideSystemTotalFooter ? (
+                              <>
+                                ₹{calculatedColumnTotals.totalValueSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <button
+                                  onClick={() => handleSetSystemTotalVisibility(false)}
+                                  className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/total:opacity-100 transition-opacity text-red-400 hover:text-red-600"
+                                  title="Hide System Total"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => handleSetSystemTotalVisibility(true)}
+                                className="text-blue-500 hover:text-blue-700 text-[10px] font-bold uppercase transition-colors"
+                              >
+                                + Restore Total
+                              </button>
+                            )}
+                          </td>
+                          {allCols.map((col, idx) => (
+                            <td
+                              key={`total-${idx}`}
+                              className={`border-r px-4 py-3 text-right font-black group/total relative ${col.isTotal ? "text-green-900 bg-green-100/40" : "text-purple-700 bg-purple-50"}`}
+                            >
+                              {!col.hideTotal ? (
+                                <>
+                                  ₹{calculatedColumnTotals.totals[idx].toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  <button
+                                    onClick={() => handleToggleColumnTotalVisibility(col.name, true)}
+                                    className="absolute left-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/total:opacity-100 transition-opacity text-red-400 hover:text-red-600"
+                                    title="Hide Column Total"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleToggleColumnTotalVisibility(col.name, false)}
+                                  className="text-blue-500 hover:text-blue-700 text-[10px] font-bold uppercase transition-colors"
+                                >
+                                  + Restore
+                                </button>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               </Card>
             )}
 
             {/* Grand total row across all products */}
-            {boqItems.length > 0 && (
-              <div className="flex justify-end">
-                <div className="bg-gray-800 text-white rounded-lg px-6 py-3 flex items-center gap-8 shadow-lg">
+            {boqItems.length > 0 && showColumnTotals && (
+              <div className="flex justify-end pt-2">
+                <div className="bg-gray-800 text-white rounded-lg px-6 py-3 flex items-center gap-8 shadow-lg group relative">
+                  <button
+                    onClick={() => setShowColumnTotals(false)}
+                    className="absolute -left-2 -top-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                    title="Hide Grand Total"
+                  >
+                    <Trash2 size={12} />
+                  </button>
                   <span className="text-sm font-semibold uppercase tracking-wider text-gray-300">Grand Total</span>
                   <span className="text-xl font-bold text-green-400">
-                    ₹{boqItems.reduce((sum, boqItem) => {
-                      let td = boqItem.table_data || {};
-                      if (typeof td === 'string') try { td = JSON.parse(td); } catch { td = {}; }
-                      if (td.materialLines && td.targetRequiredQty !== undefined) {
-                        return sum + computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty).grandTotal;
-                      }
-                      const items = Array.isArray(td.step11_items) ? td.step11_items : [];
-                      return sum + items.reduce((s: number, it: any) =>
-                        s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
-                    }, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₹{calculatedColumnTotals.totalValueSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
               </div>

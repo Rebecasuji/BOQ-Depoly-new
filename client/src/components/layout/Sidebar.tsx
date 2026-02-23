@@ -253,9 +253,36 @@ export function Sidebar() {
             </Link>
           )}
 
-          {/* Pre-Sales - only show Create Project and Create BOQ */}
           {isPreSales && (
             <>
+              <Link href="/admin/dashboard?tab=create-product">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/admin/dashboard?tab=create-product"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Create Product
+                </span>
+              </Link>
+
+              <Link href="/admin/manage-product">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    location === "/admin/manage-product"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Package className="h-4 w-4" /> Manage Product
+                </span>
+              </Link>
+
               <Link href="/create-project">
                 <span
                   className={cn(
@@ -281,32 +308,6 @@ export function Sidebar() {
                   onClick={() => setIsOpen(false)}
                 >
                   <ShoppingCart className="h-4 w-4" /> Create BOM
-                </span>
-              </Link>
-              <Link href="/finalize-bom">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                    location === "/finalize-bom"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Finalize BOM
-                </span>
-              </Link>
-              <Link href="/admin/dashboard?tab=create-product">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                    location === "/admin/dashboard?tab=create-product"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Create Product
                 </span>
               </Link>
             </>
@@ -523,21 +524,23 @@ export function Sidebar() {
                       <ShoppingCart className="h-4 w-4" /> Create BOM
                     </span>
                   </Link>
-
-                  <Link href="/finalize-bom">
-                    <span
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                        location === "/finalize-bom"
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent",
-                      )}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <CheckCircle2 className="h-4 w-4" /> Finalize BOM
-                    </span>
-                  </Link>
                 </>
+              )}
+
+              {isAdminOrSoftware && (
+                <Link href="/finalize-bom">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                      location === "/finalize-bom"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent",
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Finalize BOQ
+                  </span>
+                </Link>
               )}
             </>
           )}
@@ -661,7 +664,7 @@ export function Sidebar() {
             <LogOut className="mr-2 h-4 w-4" /> Log Out
           </Button>
         </div>
-      </aside>
+      </aside >
     </>
   );
 }

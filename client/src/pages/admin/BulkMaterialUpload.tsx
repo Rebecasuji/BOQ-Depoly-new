@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { postJSON } from "@/lib/api";
+import { useData } from "@/lib/store";
 import { Layout } from "@/components/layout/Layout";
 import { cn } from "@/lib/utils";
 import {
@@ -86,6 +87,7 @@ export default function BulkMaterialUpload() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const { toast } = useToast();
+  const { refreshMaterials, refreshPendingApprovals } = useData();
 
   const updateCell = (rowIndex: number, column: string, value: string) => {
     setTableRows((prev) => {
@@ -131,7 +133,7 @@ export default function BulkMaterialUpload() {
           next.push({
             name: "", code: "", unit: "", rate: "",
             category: "", subcategory: "", shop_name: "", vendor_category: "",
-            tax_code_type: "", tax_code_value: ""
+            tax_code_type: "", tax_code_value: "", technicalspecification: ""
           });
         }
 
@@ -209,17 +211,21 @@ export default function BulkMaterialUpload() {
         rows: preview.rows,
       });
       setResult(res);
-      toast({
-        title: "Upload Successful",
-        description: `Successfully uploaded ${preview.rows.length} materials.`,
-      });
-      // Clear after success
-      setPreview(null);
-      setTableRows(Array(10).fill(null).map(() => ({
-        name: "", code: "", unit: "", rate: "",
-        category: "", subcategory: "", vendor_category: "",
-        tax_code_type: "", tax_code_value: "", technicalspecification: ""
-      })));
+      // Clear only if there are no errors reported in the structured response
+      if (!res.errors || res.errors.length === 0) {
+        setPreview(null);
+        setTableRows(Array(10).fill(null).map(() => ({
+          name: "", code: "", unit: "", rate: "",
+          category: "", subcategory: "", vendor_category: "",
+          tax_code_type: "", tax_code_value: "", technicalspecification: ""
+        })));
+      } else {
+        toast({
+          title: "Partial Success/Errors",
+          description: `Processed with ${res.errors.length} errors. Please fix highlighted rows.`,
+          variant: "destructive"
+        });
+      }
     } catch (err: any) {
       toast({
         title: "Upload Failed",

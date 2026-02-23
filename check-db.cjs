@@ -38,4 +38,4 @@ async function checkSchema() {
   }
 }
 
-checkSchema();
+checkSchema();    

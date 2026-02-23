@@ -463,7 +463,10 @@ export async function registerRoutes(
     await query(
       `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(50)`,
     );
-    console.log("[db] material_templates tax and vendor columns ensured");
+    await query(
+      `ALTER TABLE material_templates ADD COLUMN IF NOT EXISTS technicalspecification TEXT`,
+    );
+    console.log("[db] material_templates tax/vendor/techspec columns ensured");
   } catch (err: unknown) {
     console.warn(
       "[db] Could not ensure material_templates columns:",
@@ -477,7 +480,8 @@ export async function registerRoutes(
     await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS template_id UUID`);
     await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS tax_code_type VARCHAR(10)`);
     await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS tax_code_value VARCHAR(50)`);
-    console.log("[db] materials vendor/template/tax columns ensured");
+    await query(`ALTER TABLE materials ADD COLUMN IF NOT EXISTS technicalspecification TEXT`);
+    console.log("[db] materials vendor/template/tax/techspec columns ensured");
   } catch (err: unknown) {
     console.warn(
       "[db] Could not ensure materials vendor/template/tax columns:",
@@ -1179,12 +1183,18 @@ export async function registerRoutes(
 
         const body = req.body || {};
         const id = randomUUID();
-        const attributes =
-          typeof body.attributes === "object" ? body.attributes : {};
+        // eslint-disable-next-line no-console
+        console.log('[POST /api/materials] Incoming Body:', JSON.stringify(req.body, null, 2));
+
+        const { attributes } = body;
+
+        // Allow multiple casings
+        const technicalspecification = body.technicalspecification || body.technicalSpecification || body.TechnicalSpecification || body["Technical Specification"] || null;
+        const shop_id = (body.shopId === "" ? null : body.shopId) || (body.shop_id === "" ? null : body.shop_id) || null;
 
         // eslint-disable-next-line no-console
         console.log(
-          `[POST /api/materials] inserting material: name=${body.name}, shop_id=${body.shopId}`,
+          `[POST /api/materials] extracted: name=${body.name}, shop_id=${shop_id}, technicalspecification=${technicalspecification}`,
         );
 
         const result = await query(
@@ -1195,18 +1205,18 @@ export async function registerRoutes(
             body.name || null,
             body.code || null,
             body.rate || 0,
-            body.shopId || null,
+            shop_id,
             body.unit || null,
             body.category || null,
             body.brandName || null,
             body.modelNumber || null,
-            body.subCategory || null,
+            body.subCategory || body.subcategory || null,
             body.product || null,
-            body.technicalSpecification || null,
+            technicalspecification,
             body.image || null,
             JSON.stringify(attributes || {}),
             body.masterMaterialId || null,
-            false,
+            true, // Default to true for admin-created materials
           ],
         );
 
@@ -1429,8 +1439,10 @@ export async function registerRoutes(
         "image",
       ]) {
         if (body[k] !== undefined) {
+          let val = body[k];
+          if (k === "shop_id" && val === "") val = null;
           fields.push(`${k} = $${idx++}`);
-          vals.push(body[k]);
+          vals.push(val);
         }
       }
       if (body.attributes !== undefined) {
@@ -1522,14 +1534,27 @@ export async function registerRoutes(
   // GET pending approvals for materials and shops
   app.get("/api/materials-pending-approval", async (_req, res) => {
     try {
-      // materials pending approval are those where approved is not true (NULL or false)
-      const result = await query(
-        "SELECT * FROM materials WHERE approved IS NOT TRUE ORDER BY created_at DESC",
-      );
+      // materials pending approval are those where approved is NULL
+      // Using material_submissions instead of materials for pending items
+      const result = await query(`
+        SELECT ms.*, mt.name as material_name, mt.code as material_code, s.name as shop_name, u.username as submitted_by_username
+        FROM material_submissions ms
+        LEFT JOIN material_templates mt ON ms.template_id = mt.id
+        LEFT JOIN shops s ON ms.shop_id = s.id
+        LEFT JOIN users u ON ms.submitted_by = u.id
+        WHERE ms.approved IS NULL
+        ORDER BY ms.submitted_at DESC
+      `);
       const requests = result.rows.map((r: any) => ({
         id: r.id,
         status: "pending",
-        material: r,
+        material: {
+          ...r,
+          name: r.material_name || r.name,
+          code: r.material_code || r.code
+        },
+        submittedBy: r.submitted_by_username || "Unknown",
+        submittedAt: r.submitted_at || r.created_at
       }));
       res.json({ materials: requests });
     } catch (err) {
@@ -1949,13 +1974,14 @@ export async function registerRoutes(
       }
 
       const createdTemplates: any[] = [];
-      const createdMaterials: any[] = [];
-      const linkedMaterials: any[] = [];
+      const createdSubmissions: any[] = [];
       const skipped: any[] = [];
       const errors: any[] = [];
 
       try {
         await query("BEGIN");
+        // eslint-disable-next-line no-console
+        console.log(`[POST /api/bulk-materials] Processing ${rows.length} rows`);
 
         for (let i = 0; i < rows.length; i++) {
           const raw = rows[i] || {};
@@ -1967,100 +1993,116 @@ export async function registerRoutes(
           const rate = raw.rate !== undefined && raw.rate !== null ? Number(raw.rate) : null;
           const vendor_category = (raw.vendor_category || raw.vendorCategory || null) || null;
           let tax_code_type = (raw.tax_code_type || raw.taxCodeType || null) || null;
-          // Normalize tax_code_type to match DB constraint (only 'hsn' or 'sac')
+
           if (tax_code_type) {
             const t = String(tax_code_type).toLowerCase().trim();
             if (t.includes("hsn")) tax_code_type = "hsn";
             else if (t.includes("sac")) tax_code_type = "sac";
-            else if (t.includes("gst")) tax_code_type = "hsn"; // GST -> treat as HSN by default
+            else if (t.includes("gst")) tax_code_type = "hsn";
             else tax_code_type = null;
           }
           const tax_code_value = (raw.tax_code_value || raw.taxCodeValue || null) || null;
+          const technicalspecification = (raw.technicalspecification || raw.technicalSpecification || raw.TechnicalSpecification || raw["Technical Specification"] || null) || null;
+          const shop_name = (raw.shop_name || raw.ShopName || raw.shopName || raw["Shop Name"] || "").toString().trim();
 
           if (!name) {
             skipped.push({ row: i, reason: "missing name" });
             continue;
           }
 
-          // Ensure or create material_template (non-destructive)
-          let templateId: string | null = null;
+          let shop_id = null;
+          if (shop_name) {
+            const shopRes = await query(`SELECT id FROM shops WHERE LOWER(name) = LOWER($1) LIMIT 1`, [shop_name]);
+            if (shopRes.rows.length > 0) {
+              shop_id = shopRes.rows[0].id;
+            } else {
+              errors.push({ row: i, error: `Shop "${shop_name}" not found in database.` });
+              continue;
+            }
+          } else {
+            errors.push({ row: i, error: "Shop name is required for bulk upload." });
+            continue;
+          }
 
+          // Ensure category and subcategory exist in their own lookup tables
+          if (category) {
+            try {
+              const catExists = await query('SELECT id FROM material_categories WHERE LOWER(name) = LOWER($1) LIMIT 1', [category]);
+              if (catExists.rows.length === 0) {
+                await query('INSERT INTO material_categories (id, name, created_at) VALUES ($1, $2, NOW())', [randomUUID(), category]);
+              }
+            } catch (catErr) {
+              console.warn(`[Bulk Upload] Failed to ensure category "${category}":`, catErr);
+            }
+          }
+
+          if (category && subcategory) {
+            try {
+              const subExists = await query('SELECT id FROM material_subcategories WHERE LOWER(name) = LOWER($1) AND LOWER(category) = LOWER($2) LIMIT 1', [subcategory, category]);
+              if (subExists.rows.length === 0) {
+                await query('INSERT INTO material_subcategories (id, name, category, created_at) VALUES ($1, $2, $3, NOW())', [randomUUID(), subcategory, category]);
+              }
+            } catch (subErr) {
+              console.warn(`[Bulk Upload] Failed to ensure subcategory "${subcategory}" for category "${category}":`, subErr);
+            }
+          }
+
+          // Ensure or create material_template
+          let templateId: string | null = null;
           try {
-            // If code provided, prefer matching template by code
             if (code) {
               const existing = await query(`SELECT id FROM material_templates WHERE code = $1 LIMIT 1`, [code]);
-              if (existing.rows.length > 0) {
-                templateId = existing.rows[0].id;
-              }
+              if (existing.rows.length > 0) templateId = existing.rows[0].id;
             }
-
             if (!templateId) {
-              // Try by name
               const byName = await query(`SELECT id FROM material_templates WHERE name = $1 LIMIT 1`, [name]);
-              if (byName.rows.length > 0) {
-                templateId = byName.rows[0].id;
-              }
+              if (byName.rows.length > 0) templateId = byName.rows[0].id;
             }
 
             if (!templateId) {
               const tId = randomUUID();
               const tCode = code || `ITM-${tId.slice(0, 8)}`;
               const tpl = await query(
-                `INSERT INTO material_templates (id, name, code, category, subcategory, vendor_category, tax_code_type, tax_code_value, created_at, updated_at)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW()) RETURNING *`,
-                [tId, name, tCode, category, subcategory, vendor_category, tax_code_type, tax_code_value],
+                `INSERT INTO material_templates (id, name, code, category, subcategory, vendor_category, tax_code_type, tax_code_value, technicalspecification, created_at, updated_at)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW()) RETURNING *`,
+                [tId, name, tCode, category, subcategory, vendor_category, tax_code_type, tax_code_value, technicalspecification],
               );
               templateId = tpl.rows[0].id;
               createdTemplates.push(tpl.rows[0]);
             }
           } catch (tplErr) {
-            errors.push({ row: i, error: String(tplErr) });
+            errors.push({ row: i, error: `Template error: ${String(tplErr)}` });
             continue;
           }
 
-          // Insert material if not exists (by code if present, else by name)
+          // Create Material Submission instead of direct material
           try {
-            let exists = null;
-            if (code) {
-              exists = await query(`SELECT id FROM materials WHERE code = $1 LIMIT 1`, [code]);
-            }
-            if (!exists || exists.rows.length === 0) {
-              const byName = await query(`SELECT id, template_id FROM materials WHERE name = $1 LIMIT 1`, [name]);
-              if (byName.rows.length > 0) {
-                // Material exists by name — ensure it's linked to template
-                const matId = byName.rows[0].id;
-                const currentTemplate = byName.rows[0].template_id || null;
-                if (!currentTemplate && templateId) {
-                  await query(`UPDATE materials SET template_id = $1 WHERE id = $2`, [templateId, matId]);
-                  linkedMaterials.push({ row: i, id: matId });
-                } else {
-                  skipped.push({ row: i, reason: 'material exists by name', id: matId });
-                }
-                continue;
-              }
-            } else {
-              // Material exists by code — ensure it's linked to template
-              const mat = exists.rows[0];
-              const matId = mat.id;
-              const matTemplateId = mat.template_id || null;
-              if (!matTemplateId && templateId) {
-                await query(`UPDATE materials SET template_id = $1 WHERE id = $2`, [templateId, matId]);
-                linkedMaterials.push({ row: i, id: matId });
-              } else {
-                skipped.push({ row: i, reason: 'material exists by code', id: matId });
-              }
-              continue;
-            }
-
-            const mId = randomUUID();
-            const mCode = code || `MAT-${mId.slice(0, 8)}`;
-            const insert = await query(
-              `INSERT INTO materials (id, name, code, rate, unit, category, subcategory, vendor_category, template_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *`,
-              [mId, name, mCode, rate, unit, category, subcategory, vendor_category, templateId],
+            const msId = randomUUID();
+            const submission = await query(
+              `INSERT INTO material_submissions (id, template_id, shop_id, rate, unit, brandname, modelnumber, subcategory, category, product, technicalspecification, dimensions, finishtype, metaltype, submitted_by, submitted_at, approved)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NULL)
+               RETURNING *`,
+              [
+                msId,
+                templateId,
+                shop_id,
+                rate,
+                unit,
+                raw.brandname || raw.brandName || null,
+                raw.modelnumber || raw.modelNumber || null,
+                subcategory,
+                category,
+                raw.product || null,
+                technicalspecification,
+                raw.dimensions || null,
+                raw.finishtype || raw.finish || null,
+                raw.metaltype || raw.metalType || null,
+                (req as any).user?.id
+              ],
             );
-            createdMaterials.push(insert.rows[0]);
-          } catch (matErr) {
-            errors.push({ row: i, error: String(matErr) });
+            createdSubmissions.push(submission.rows[0]);
+          } catch (msErr) {
+            errors.push({ row: i, error: `Submission error: ${String(msErr)}` });
             continue;
           }
         }
@@ -2068,18 +2110,14 @@ export async function registerRoutes(
         await query("COMMIT");
 
         res.json({
-          message: "Bulk upload completed",
+          message: "Bulk upload submitted for approval",
           createdTemplatesCount: createdTemplates.length,
-          createdMaterialsCount: createdMaterials.length,
+          createdSubmissionsCount: createdSubmissions.length,
           skipped,
           errors,
         });
       } catch (err) {
-        try {
-          await query("ROLLBACK");
-        } catch (rbErr) {
-          console.error("rollback failed", rbErr);
-        }
+        try { await query("ROLLBACK"); } catch (rbErr) { console.error("rollback failed", rbErr); }
         console.error("/api/bulk-materials error", err);
         res.status(500).json({ message: "bulk upload failed", error: String(err) });
       }

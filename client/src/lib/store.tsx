@@ -55,6 +55,8 @@ interface DataContextType {
   addSupportMessage?: (senderName: string, message: string, info?: string) => Promise<void>;
   deleteMessage?: (id: string) => Promise<void>;
   supplierSubmissions?: any[];
+  refreshMaterials: () => Promise<void>;
+  refreshPendingApprovals: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -110,6 +112,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
     taxCodeType: mat.tax_code_type || mat.taxCodeType || null,
     taxCodeValue: mat.tax_code_value || mat.taxCodeValue || "",
   } as Material);
+
+  const refreshMaterials = async () => {
+    try {
+      const dd = await getJSON('/materials');
+      if (dd?.materials) {
+        setMaterials(dd.materials.map(normalizeMaterial));
+      }
+    } catch (e) {
+      console.warn('refreshMaterials failed', e);
+    }
+  };
+
+  const refreshPendingApprovals = async () => {
+    try {
+      const pm = await getJSON('/materials-pending-approval');
+      if (pm?.materials) {
+        const transformed = pm.materials.map((r: any) => ({
+          id: r.id,
+          material: r.material || r,
+          status: r.status || 'pending',
+          submittedBy: r.submittedBy || 'Unknown',
+          submittedAt: r.submittedAt || new Date().toISOString(),
+        }));
+        setMaterialApprovalRequests(transformed);
+      }
+    } catch (e) {
+      console.warn('refreshPendingApprovals failed', e);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -472,6 +503,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     submitMaterialForApproval,
     addSupportMessage,
     deleteMessage,
+    refreshMaterials,
+    refreshPendingApprovals,
   };
 
   return (
