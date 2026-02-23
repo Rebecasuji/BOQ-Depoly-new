@@ -128,6 +128,8 @@ export default function FinalizeBoq() {
   const [savingLayoutId, setSavingLayoutId] = useState<string | null>(null);
   const [showColumnTotals, setShowColumnTotals] = useState(true);
   const [hideSystemTotalFooter, setHideSystemTotalFooter] = useState(false);
+  // Manual quantity per boqItem: { [id: string]: string }
+  const [productQuantities, setProductQuantities] = useState<{ [id: string]: string }>({});
 
   // Decoupled Global Header State for custom columns
   const [globalColSettings, setGlobalColSettings] = useState<{ [colName: string]: any }>({});
@@ -205,22 +207,40 @@ export default function FinalizeBoq() {
   const calculatedColumnTotals = React.useMemo(() => {
     let totals = allCols.map(() => 0);
     let totalValueSum = 0;
+    let totalRateSum = 0;
+    let totalQtySum = 0;
 
     boqItems.forEach(item => {
       let td = item.table_data || {};
       if (typeof td === "string") try { td = JSON.parse(td); } catch { td = {}; }
 
       let itemTotal = 0;
+      let itemRate = 0;
+      let itemQty = 0;
+
       if (td.materialLines && td.targetRequiredQty !== undefined) {
-        itemTotal = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty).grandTotal;
+        const res = computeBoq(td.configBasis, td.materialLines, td.targetRequiredQty);
+        itemTotal = res.grandTotal;
+        itemQty = td.targetRequiredQty;
+        itemRate = itemQty > 0 ? itemTotal / itemQty : 0;
       } else {
         const step11Items = Array.isArray(td.step11_items) ? td.step11_items : [];
         itemTotal = step11Items.reduce((s: number, it: any) =>
           s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
+        itemQty = step11Items[0]?.qty || 0;
+        itemRate = itemQty > 0 ? itemTotal / itemQty : itemTotal;
       }
-      totalValueSum += itemTotal;
 
-      let currentItemRunningTotal = itemTotal;
+      const manualQtyStr = productQuantities[item.id];
+      const displayQty = manualQtyStr !== undefined
+        ? (parseFloat(manualQtyStr) || 0)
+        : itemQty;
+
+      totalValueSum += itemRate * displayQty;
+      totalRateSum += itemRate;
+      // totalQtySum += displayQty; // User requested no total for Qty
+
+      let currentItemRunningTotal = itemRate * displayQty;
       let accumulator = 0;
       allCols.forEach((col, idx) => {
         if (col.isTotal) {
@@ -235,7 +255,7 @@ export default function FinalizeBoq() {
       });
     });
 
-    return { totals, totalValueSum };
+    return { totals, totalValueSum, totalRateSum, totalQtySum };
   }, [boqItems, allCols, customColumnValues]);
 
   const handleColumnReorder = async (newOrder: typeof allCols) => {
@@ -415,7 +435,7 @@ export default function FinalizeBoq() {
           throw new Error(errMsg);
         };
 
-        // Load BOM items
+        // Load BOM items                    
         const response = await apiFetch(
           `/api/boq-items/version/${encodeURIComponent(selectedVersionId)}`,
           { headers: {} },
@@ -430,6 +450,7 @@ export default function FinalizeBoq() {
             const restoredCols: { [id: string]: { name: string, isTotal: boolean, hideTotal?: boolean }[] } = {};
             const restoredVals: { [id: string]: { [rowIdx: number]: { [col: string]: string } } } = {};
             const restoredDescs: { [id: string]: string } = {};
+            const restoredQtys: { [id: string]: string } = {};
             let sysTotalHidden = false;
 
             for (const item of items) {
@@ -450,6 +471,9 @@ export default function FinalizeBoq() {
               if (typeof td.finalize_description === "string") {
                 restoredDescs[item.id] = td.finalize_description;
               }
+              if (td.finalize_qty !== undefined && td.finalize_qty !== null) {
+                restoredQtys[item.id] = String(td.finalize_qty);
+              }
             }
             if (Object.keys(restoredCols).length > 0) {
               setCustomColumns(restoredCols);
@@ -469,6 +493,7 @@ export default function FinalizeBoq() {
             }
             if (Object.keys(restoredVals).length > 0) setCustomColumnValues(restoredVals);
             if (Object.keys(restoredDescs).length > 0) setProductDescriptions(restoredDescs);
+            if (Object.keys(restoredQtys).length > 0) setProductQuantities(restoredQtys);
             setHideSystemTotalFooter(sysTotalHidden);
           } catch (e) {
             toast({ title: "Error", description: "Failed to parse BOM items response", variant: "destructive" });
@@ -624,7 +649,7 @@ export default function FinalizeBoq() {
     });
   };
 
-  const saveItemLayout = async (boqItemId: string, updatedCols?: any[], updatedVals?: any, updatedDesc?: string) => {
+  const saveItemLayout = async (boqItemId: string, updatedCols?: any[], updatedVals?: any, updatedDesc?: string, updatedQty?: string) => {
     try {
       const boqItem = boqItems.find(i => i.id === boqItemId);
       if (!boqItem) return;
@@ -639,6 +664,7 @@ export default function FinalizeBoq() {
         finalize_columns: updatedCols !== undefined ? updatedCols : (customColumns[boqItemId] || []),
         finalize_column_values: updatedVals !== undefined ? updatedVals : (customColumnValues[boqItemId] || {}),
         finalize_description: updatedDesc !== undefined ? updatedDesc : (productDescriptions[boqItemId] ?? ""),
+        finalize_qty: updatedQty !== undefined ? updatedQty : (productQuantities[boqItemId] ?? null),
         finalize_hide_system_total: hideSystemTotalFooter,
       };
 
@@ -1011,6 +1037,7 @@ export default function FinalizeBoq() {
       "Description / Location",
       ...allCols.map(c => c.name),
       "Rate / Unit",
+      "Qty",
       "Total Value (₹)"
     ];
 
@@ -1047,6 +1074,13 @@ export default function FinalizeBoq() {
         const productName = tableData.product_name || boqItem.estimator || "—";
         const category = tableData.category || "";
 
+        const manualQtyStr = productQuantities[boqItem.id];
+        const displayQty = manualQtyStr !== undefined
+          ? (parseFloat(manualQtyStr) || 0)
+          : (tableData.materialLines && tableData.targetRequiredQty !== undefined
+            ? tableData.targetRequiredQty
+            : (step11Items[0]?.qty || 0));
+
         let totalVal = 0;
         let rateSqft = 0;
         if (tableData.materialLines && tableData.targetRequiredQty !== undefined) {
@@ -1059,6 +1093,9 @@ export default function FinalizeBoq() {
           rateSqft = (step11Items[0]?.qty ?? 0) > 0 ? totalVal / (step11Items[0]?.qty || 1) : totalVal;
         }
 
+        // Adjust for manual qty
+        totalVal = rateSqft * displayQty;
+
         const manualDesc = productDescriptions[boqItem.id] ?? (
           tableData.subcategory || step11Items[0]?.description || category || ""
         );
@@ -1069,6 +1106,15 @@ export default function FinalizeBoq() {
           else if (colName === "Product / Material") row.push(productName);
           else if (colName === "Description / Location") row.push(manualDesc);
           else if (colName === "Rate / Unit") row.push(Number(rateSqft.toFixed(2)));
+          else if (colName === "Qty") {
+            const manualQtyStr = productQuantities[boqItem.id];
+            const qty = manualQtyStr !== undefined
+              ? (parseFloat(manualQtyStr) || 0)
+              : (tableData.materialLines && tableData.targetRequiredQty !== undefined
+                ? tableData.targetRequiredQty
+                : (step11Items[0]?.qty || 0));
+            row.push(Number(qty.toFixed(2)));
+          }
           else if (colName === "Total Value (₹)") row.push(Number(totalVal.toFixed(2)));
           else {
             // It's a custom column
@@ -1107,6 +1153,12 @@ export default function FinalizeBoq() {
         if (colName === "Product / Material") footerRow[idx] = "GRAND TOTAL";
         else if (colName === "Total Value (₹)") {
           footerRow[idx] = Number(calculatedColumnTotals.totalValueSum.toFixed(2));
+        } else if (colName === "Rate / Unit") {
+          footerRow[idx] = Number(calculatedColumnTotals.totalRateSum.toFixed(2));
+        } else if (colName === "Qty") {
+          footerRow[idx] = "";
+        } else if (colName === "Description / Location") {
+          footerRow[idx] = "";
         } else if (allCols.some(c => c.name === colName)) {
           const colIdx = allCols.findIndex(c => c.name === colName);
           footerRow[idx] = Number(calculatedColumnTotals.totals[colIdx].toFixed(2));
@@ -1151,6 +1203,7 @@ export default function FinalizeBoq() {
         "Product / Material",
         "Description",
         "Rate (₹)",
+        "Qty",
         "Total (₹)",
         ...allCols.map(c => c.name)
       ];
@@ -1167,6 +1220,13 @@ export default function FinalizeBoq() {
         const productName = tableData.product_name || boqItem.estimator || "—";
         const category = tableData.category || "";
 
+        const manualQtyStr = productQuantities[boqItem.id];
+        const displayQty = manualQtyStr !== undefined
+          ? (parseFloat(manualQtyStr) || 0)
+          : (tableData.materialLines && tableData.targetRequiredQty !== undefined
+            ? tableData.targetRequiredQty
+            : (step11Items[0]?.qty || 0));
+
         // Totals
         let totalVal = 0;
         let rateSqft = 0;
@@ -1179,6 +1239,9 @@ export default function FinalizeBoq() {
             s + (it.qty || 0) * ((it.supply_rate || 0) + (it.install_rate || 0)), 0);
           rateSqft = (step11Items[0]?.qty ?? 0) > 0 ? totalVal / (step11Items[0]?.qty || 1) : totalVal;
         }
+
+        // Adjust for manual qty
+        totalVal = rateSqft * displayQty;
 
         const manualDesc = productDescriptions[boqItem.id] ?? (
           tableData.subcategory || step11Items[0]?.description || category || ""
@@ -1207,6 +1270,7 @@ export default function FinalizeBoq() {
           productName,
           manualDesc,
           rateSqft.toFixed(2),
+          (productQuantities[boqItem.id] !== undefined ? parseFloat(productQuantities[boqItem.id]) || 0 : (tableData.materialLines && tableData.targetRequiredQty !== undefined ? tableData.targetRequiredQty : (step11Items[0]?.qty || 0))).toFixed(2),
           totalVal.toFixed(2),
           ...customVals
         ]);
@@ -1258,6 +1322,23 @@ export default function FinalizeBoq() {
         styles: { fontSize: 8 },
         headStyles: { fillColor: [64, 64, 64], textColor: [255, 255, 255], fontStyle: "bold" },
         theme: "grid",
+        foot: [[
+          "",
+          "GRAND TOTAL",
+          "",
+          "₹" + calculatedColumnTotals.totalRateSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          "",
+          "₹" + grandTotalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          ...allCols.map(c => {
+            if (c.isTotal) {
+              const colIdx = allCols.findIndex(cc => cc.name === c.name);
+              const totalVal = calculatedColumnTotals.totals[colIdx] || 0;
+              return "₹" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+            return "";
+          })
+        ]],
+        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: "bold" },
       });
 
       const filename = `${projNameStr}_${selectedVersion ? `V${selectedVersion.version_number}` : "draft"}_BOM.pdf`;
@@ -1498,6 +1579,7 @@ export default function FinalizeBoq() {
                 "Product / Material",
                 "Description / Location",
                 "Rate / Unit",
+                "Qty",
                 "Total Value (₹)",
                 ...allCols.map(c => c.name)
               ].map(col => (
@@ -1696,10 +1778,11 @@ export default function FinalizeBoq() {
                         <th className="border-r py-1 text-center font-extrabold">C</th>
                         <th className="border-r py-1 text-center">D</th>
                         <th className="border-r py-1 text-center font-bold">E</th>
-                        <th className="border-r py-1 text-center text-green-700">F</th>
+                        <th className="border-r py-1 text-center font-bold">F</th>
+                        <th className="border-r py-1 text-center text-green-700">G</th>
                         {allCols.map((_, idx) => (
                           <th key={idx} className="border-r py-1 text-center text-purple-700">
-                            {getExcelColumnName(idx + 6)}
+                            {getExcelColumnName(idx + 7)}
                           </th>
                         ))}
                       </tr>
@@ -1711,6 +1794,7 @@ export default function FinalizeBoq() {
                         <th className="border-r px-4 py-4 text-left min-w-[200px]">Product / Material</th>
                         <th className="border-r px-4 py-4 text-left min-w-[250px]">Description / Location</th>
                         <th className="border-r px-5 py-4 text-right w-36">Rate / Unit</th>
+                        <th className="border-r px-5 py-4 text-right w-32">Qty</th>
                         <th className="border-r px-5 py-4 text-right w-40 text-green-900 bg-green-50/50">Total Value (₹)</th>
                         <Reorder.Group
                           axis="x"
@@ -1982,8 +2066,19 @@ export default function FinalizeBoq() {
                             <td className="border-r px-4 py-3 text-right font-black text-gray-500 align-middle">
                               ₹{rateSqft.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
+                            <td className="border-r px-4 py-3 text-right font-black text-gray-800 align-middle">
+                              <input
+                                type="number"
+                                value={productQuantities[boqItem.id] ?? (tableData.materialLines && tableData.targetRequiredQty !== undefined ? tableData.targetRequiredQty : (step11Items[0]?.qty || 0))}
+                                disabled={isVersionSubmitted}
+                                onChange={e => setProductQuantities(prev => ({ ...prev, [boqItem.id]: e.target.value }))}
+                                onBlur={() => saveItemLayout(boqItem.id, undefined, undefined, undefined, productQuantities[boqItem.id])}
+                                className="w-full border-none rounded p-1.5 text-xs focus:ring-1 ring-blue-300 outline-none bg-transparent text-right font-black"
+                                placeholder="Qty"
+                              />
+                            </td>
                             <td className="border-r px-4 py-3 text-right font-black text-green-700 bg-green-50/20 align-middle">
-                              ₹{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ₹{(rateSqft * (productQuantities[boqItem.id] !== undefined ? parseFloat(productQuantities[boqItem.id]) || 0 : (tableData.materialLines && tableData.targetRequiredQty !== undefined ? tableData.targetRequiredQty : (step11Items[0]?.qty || 0)))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                             {/* Custom columns */}
                             {(() => {
@@ -2068,8 +2163,15 @@ export default function FinalizeBoq() {
                               <Trash2 size={12} />
                             </button>
                           </td>
-                          <td className="border-r"></td>
-                          <td className="border-r"></td>
+                          <td className="border-r px-4 py-3 text-right font-black text-gray-600 bg-gray-50/50">
+                            {/* Description total - empty */}
+                          </td>
+                          <td className="border-r px-4 py-3 text-right font-black text-gray-600 bg-gray-50/50">
+                            ₹{calculatedColumnTotals.totalRateSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="border-r px-4 py-3 text-right font-black text-gray-600 bg-gray-50/50">
+                            {/* Qty Total intentionally left empty per user request */}
+                          </td>
                           <td className="border-r px-4 py-3 text-right font-black text-green-700 bg-green-50/30 group/total relative">
                             {!hideSystemTotalFooter ? (
                               <>
