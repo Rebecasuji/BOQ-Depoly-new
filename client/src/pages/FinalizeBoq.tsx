@@ -183,7 +183,7 @@ export default function FinalizeBoq() {
   };
 
   const allCols = React.useMemo(() => {
-    const cols: { name: string, isTotal: boolean, isPercentage?: boolean, percentageValue?: number, baseValue?: number, baseSource?: string, hideTotal?: boolean, hideColumn?: boolean }[] = [];
+    const cols: { name: string, isTotal: boolean, isPercentage?: boolean, percentageValue?: number, baseValue?: number, baseSource?: string, operator?: string, hideTotal?: boolean, hideColumn?: boolean }[] = [];
     boqItems.forEach(item => {
       (customColumns[item.id] || []).forEach(col => {
         if (!cols.find(c => c.name === col.name)) cols.push(col);
@@ -239,36 +239,61 @@ export default function FinalizeBoq() {
         ? (parseFloat(manualQtyStr) || 0)
         : itemQty;
 
-      totalValueSum += itemRate * displayQty;
+      const baseTotalValue = itemRate * displayQty;
+      totalValueSum += baseTotalValue;
       totalRateSum += itemRate;
-      // totalQtySum += displayQty; // User requested no total for Qty
 
-      let currentItemRunningTotal = itemRate * displayQty;
+      let currentItemRunningTotal = baseTotalValue;
       let accumulator = 0;
+      const rowCalculatedValues: { [colName: string]: number } = {};
+
       allCols.forEach((col, idx) => {
+        const itemCol = (customColumns[item.id] || []).find(c => c.name === col.name) || col;
+
         if (col.isTotal) {
           currentItemRunningTotal += accumulator;
           accumulator = 0;
+          rowCalculatedValues[col.name] = currentItemRunningTotal;
           totals[idx] += currentItemRunningTotal;
         } else {
-          // Dynamic calculation for percentage columns based on Total Value
           let val = 0;
-          const itemCol = (customColumns[item.id] || []).find(c => c.name === col.name) || col;
           const baseSource = itemCol.baseSource;
-          if (itemCol.isPercentage && baseSource === "Total Value (₹)") {
-            val = (itemRate * displayQty) * (itemCol.percentageValue / 100);
-          } else if (itemCol.isPercentage && baseSource === "Rate / Unit") {
-            val = itemRate * (itemCol.percentageValue / 100);
-          } else if (itemCol.isPercentage && baseSource === "Qty") {
-            val = displayQty * (itemCol.percentageValue / 100);
-          } else if (itemCol.isPercentage && baseSource && baseSource !== "manual") {
-            // Chained percentage calculation
-            const baseValStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
-            const baseVal = parseFloat(baseValStr) || 0;
-            val = baseVal * (itemCol.percentageValue / 100);
+          const operator = itemCol.operator || "%";
+          const multiplier = itemCol.percentageValue || 0;
+
+          let baseVal = 0;
+          if (baseSource === "Total Value (₹)") {
+            baseVal = baseTotalValue;
+          } else if (baseSource === "Rate / Unit") {
+            baseVal = itemRate;
+          } else if (baseSource === "Qty") {
+            baseVal = displayQty;
+          } else if (baseSource && baseSource !== "manual") {
+            // Check if baseSource is a previously calculated column in this row (including isTotal columns)
+            if (rowCalculatedValues[baseSource] !== undefined) {
+              baseVal = rowCalculatedValues[baseSource];
+            } else {
+              const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
+              baseVal = parseFloat(valStr) || 0;
+            }
           } else {
+            baseVal = itemCol.baseValue || 0;
+          }
+
+          if (operator === "%") {
+            val = baseVal * (multiplier / 100);
+          } else if (operator === "*") {
+            val = baseVal * multiplier;
+          } else if (operator === "/") {
+            val = multiplier !== 0 ? baseVal / multiplier : 0;
+          } else if (operator === "+") {
+            val = baseVal + multiplier;
+          } else {
+            // Fallback to manual value if operator is unknown and source is manual
             val = parseFloat(customColumnValues[item.id]?.[0]?.[col.name] || "0") || 0;
           }
+
+          rowCalculatedValues[col.name] = val;
           accumulator += val;
           totals[idx] += val;
         }
@@ -276,7 +301,7 @@ export default function FinalizeBoq() {
     });
 
     return { totals, totalValueSum, totalRateSum, totalQtySum };
-  }, [boqItems, allCols, customColumnValues, productQuantities]);
+  }, [boqItems, allCols, customColumns, customColumnValues, productQuantities]);
 
   const handleColumnReorder = async (newOrder: typeof allCols) => {
     // Optimistically update local state for all items
@@ -752,15 +777,15 @@ export default function FinalizeBoq() {
     toast({ title: "Column Cloned", description: `Column "${originalCol.name}" cloned to "${newColName}" and saved.` });
   };
 
-  const handleGlobalCalculation = async (colName: string, base: number, pct: number, baseSource: string = "manual") => {
+  const handleGlobalCalculation = async (colName: string, base: number, multiplier: number, baseSource: string = "manual", operator: string = "%") => {
     const oldSettings = globalColSettings[colName] || {};
-    const oldPct = oldSettings.percentageValue || 0;
-    const deltaPct = pct - oldPct;
+    const oldMultiplier = oldSettings.percentageValue || 0;
+    const deltaMultiplier = multiplier - oldMultiplier;
 
     // Update the decoupled global state immediately
     setGlobalColSettings(prev => ({
       ...prev,
-      [colName]: { baseValue: base, percentageValue: pct, baseSource }
+      [colName]: { baseValue: base, percentageValue: multiplier, baseSource, operator }
     }));
 
     const nextColsMap: any = {};
@@ -770,9 +795,9 @@ export default function FinalizeBoq() {
       let itemCols = customColumns[item.id] || [];
       let itemCol = itemCols.find(c => c.name === colName);
 
-      // If we are adjusting pct, apply delta to whatever the row currently has
-      const currentRowPct = itemCol?.percentageValue || oldPct;
-      const newRowPct = currentRowPct + deltaPct;
+      // If we are adjusting multiplier, apply delta to whatever the row currently has
+      const currentRowMultiplier = itemCol?.percentageValue || oldMultiplier;
+      const newRowMultiplier = currentRowMultiplier + deltaMultiplier;
 
       let rowBase = base;
       if (baseSource !== "manual") {
@@ -805,17 +830,39 @@ export default function FinalizeBoq() {
         } else if (baseSource === "Qty") {
           rowBase = displayQty;
         } else {
-          const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
-          rowBase = parseFloat(valStr) || 0;
+          // Identify if it's another custom column or a total column
+          const baseCol = itemCols.find(c => c.name === baseSource);
+          if (baseCol?.isTotal) {
+            // Calculate running total up to this column
+            let runningTotal = itemRate * displayQty;
+            let accumulator = 0;
+            for (const c of itemCols) {
+              if (c.name === baseSource) {
+                runningTotal += accumulator;
+                break;
+              }
+              const val = parseFloat(customColumnValues[item.id]?.[0]?.[c.name] || "0") || 0;
+              accumulator += val;
+            }
+            rowBase = runningTotal;
+          } else {
+            const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
+            rowBase = parseFloat(valStr) || 0;
+          }
         }
       }
 
       const updatedCols = itemCols.map(c =>
-        c.name === colName ? { ...c, baseValue: base, percentageValue: newRowPct, baseSource } : c
+        c.name === colName ? { ...c, baseValue: base, percentageValue: newRowMultiplier, baseSource, operator, isPercentage: (baseSource !== "manual") } : c
       );
       nextColsMap[item.id] = updatedCols;
 
-      const calculated = (newRowPct / 100) * rowBase;
+      let calculated = 0;
+      if (operator === "%") calculated = rowBase * (newRowMultiplier / 100);
+      else if (operator === "*") calculated = rowBase * newRowMultiplier;
+      else if (operator === "/") calculated = newRowMultiplier !== 0 ? rowBase / newRowMultiplier : 0;
+      else if (operator === "+") calculated = rowBase + newRowMultiplier;
+
       const itemVals = { ...(customColumnValues[item.id] || {}) };
       itemVals[0] = { ...(itemVals[0] || {}), [colName]: calculated.toFixed(2) };
       nextValsMap[item.id] = itemVals;
@@ -829,7 +876,7 @@ export default function FinalizeBoq() {
     ));
   };
 
-  const handleItemCalculation = async (boqItemId: string, colName: string, pct: number) => {
+  const handleItemCalculation = async (boqItemId: string, colName: string, multiplier: number, operator: string = "%") => {
     const item = boqItems.find(i => i.id === boqItemId);
     if (!item) return;
 
@@ -870,14 +917,34 @@ export default function FinalizeBoq() {
       } else if (baseSource === "Qty") {
         rowBase = displayQty;
       } else {
-        const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
-        rowBase = parseFloat(valStr) || 0;
+        const baseCol = itemCols.find(c => c.name === baseSource);
+        if (baseCol?.isTotal) {
+          let runningTotal = itemRate * displayQty;
+          let accumulator = 0;
+          for (const c of itemCols) {
+            if (c.name === baseSource) {
+              runningTotal += accumulator;
+              break;
+            }
+            const val = parseFloat(customColumnValues[item.id]?.[0]?.[c.name] || "0") || 0;
+            accumulator += val;
+          }
+          rowBase = runningTotal;
+        } else {
+          const valStr = customColumnValues[item.id]?.[0]?.[baseSource] || "0";
+          rowBase = parseFloat(valStr) || 0;
+        }
       }
     }
 
-    const calculated = (pct / 100) * rowBase;
+    let calculated = 0;
+    if (operator === "%") calculated = rowBase * (multiplier / 100);
+    else if (operator === "*") calculated = rowBase * multiplier;
+    else if (operator === "/") calculated = multiplier !== 0 ? rowBase / multiplier : 0;
+    else if (operator === "+") calculated = rowBase + multiplier;
+
     const nextCols = itemCols.map(c =>
-      c.name === colName ? { ...c, percentageValue: pct } : c
+      c.name === colName ? { ...c, percentageValue: multiplier, operator, isPercentage: (baseSource !== "manual") } : c
     );
 
     const itemVals = { ...(customColumnValues[item.id] || {}) };
@@ -1944,7 +2011,7 @@ export default function FinalizeBoq() {
                                         onClick={(e) => e.stopPropagation()}
                                         onChange={(e) => {
                                           const newSource = e.target.value;
-                                          handleGlobalCalculation(col.name, globalColSettings[col.name]?.baseValue || 0, globalColSettings[col.name]?.percentageValue || 0, newSource);
+                                          handleGlobalCalculation(col.name, globalColSettings[col.name]?.baseValue || 0, globalColSettings[col.name]?.percentageValue || 0, newSource, globalColSettings[col.name]?.operator || "%");
                                         }}
                                       >
                                         <option value="manual">Fixed Value</option>
@@ -1988,23 +2055,37 @@ export default function FinalizeBoq() {
                                         )}
                                       </div>
 
-                                      <span className="text-[10px] text-purple-400 font-black">×</span>
+                                      <select
+                                        className="bg-white border border-purple-200 rounded text-[11px] font-black text-purple-700 outline-none h-7 px-1 cursor-pointer"
+                                        value={globalColSettings[col.name]?.operator || "%"}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => {
+                                          const newOp = e.target.value;
+                                          handleGlobalCalculation(col.name, globalColSettings[col.name]?.baseValue || 0, globalColSettings[col.name]?.percentageValue || 0, globalColSettings[col.name]?.baseSource || "manual", newOp);
+                                        }}
+                                      >
+                                        <option value="%">%</option>
+                                        <option value="*">×</option>
+                                        <option value="/">÷</option>
+                                        <option value="+">+</option>
+                                      </select>
 
                                       <div className="flex items-center gap-1.5 w-20 flex-shrink-0">
                                         <input
                                           type="number"
-                                          placeholder="%"
+                                          placeholder="Value"
                                           className="w-14 h-9 bg-white border-2 border-purple-300 rounded-md px-2 text-[13px] font-black text-purple-700 outline-none focus:ring-2 ring-purple-400/50 text-right shadow-sm transition-all"
                                           value={globalColSettings[col.name]?.percentageValue || ""}
                                           onClick={(e) => e.stopPropagation()}
                                           onChange={async (e) => {
-                                            const newPct = parseFloat(e.target.value) || 0;
+                                            const newVal = parseFloat(e.target.value) || 0;
                                             const currentBase = globalColSettings[col.name]?.baseValue || 0;
                                             const currentSource = globalColSettings[col.name]?.baseSource || "manual";
-                                            handleGlobalCalculation(col.name, currentBase, newPct, currentSource);
+                                            const currentOp = globalColSettings[col.name]?.operator || "%";
+                                            handleGlobalCalculation(col.name, currentBase, newVal, currentSource, currentOp);
                                           }}
                                         />
-                                        <span className="text-[13px] text-purple-600 font-black">%</span>
+                                        <span className="text-[13px] text-purple-600 font-black">{globalColSettings[col.name]?.operator || "%"}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -2155,10 +2236,13 @@ export default function FinalizeBoq() {
 
                               let itemTotal = baseTotalValue;
                               let accumulator = 0;
+                              const rowCalculatedValues: { [colName: string]: number } = {};
+
                               return allCols.map((col, idx) => {
                                 if (col.isTotal) {
                                   itemTotal += accumulator;
                                   accumulator = 0;
+                                  rowCalculatedValues[col.name] = itemTotal;
                                   return (
                                     <td key={`${col.name}-${idx}`} className="border-r px-4 py-3 text-right font-black text-green-900 bg-green-100/40">
                                       ₹{itemTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2167,24 +2251,40 @@ export default function FinalizeBoq() {
                                 } else {
                                   const itemColList = customColumns[boqItem.id] || [];
                                   const itemCol = itemColList.find((c: any) => c.name === col.name) || col;
-                                  const isCalculated = (itemCol as any).isPercentage && (itemCol as any).baseSource && (itemCol as any).baseSource !== "manual";
+                                  const baseSource = (itemCol as any).baseSource;
+                                  const isCalculated = baseSource && baseSource !== "manual";
+                                  const operator = (itemCol as any).operator || "%";
+                                  const multiplier = (itemCol as any).percentageValue || 0;
 
-                                  let val = "0";
-                                  if (isCalculated && (itemCol as any).baseSource === "Total Value (₹)") {
-                                    val = (baseTotalValue * ((itemCol as any).percentageValue / 100)).toFixed(2);
-                                  } else if (isCalculated && (itemCol as any).baseSource === "Rate / Unit") {
-                                    val = (rateSqft * ((itemCol as any).percentageValue / 100)).toFixed(2);
-                                  } else if (isCalculated && (itemCol as any).baseSource === "Qty") {
-                                    val = (displayQty * ((itemCol as any).percentageValue / 100)).toFixed(2);
-                                  } else if (isCalculated && (itemCol as any).baseSource) {
-                                    const baseValStr = customColumnValues[boqItem.id]?.[0]?.[(itemCol as any).baseSource] || "0";
-                                    val = (parseFloat(baseValStr) * ((itemCol as any).percentageValue / 100)).toFixed(2);
+                                  let valNum = 0;
+                                  if (isCalculated) {
+                                    let baseVal = 0;
+                                    if (baseSource === "Total Value (₹)") {
+                                      baseVal = baseTotalValue;
+                                    } else if (baseSource === "Rate / Unit") {
+                                      baseVal = rateSqft;
+                                    } else if (baseSource === "Qty") {
+                                      baseVal = displayQty;
+                                    } else if (rowCalculatedValues[baseSource] !== undefined) {
+                                      baseVal = rowCalculatedValues[baseSource];
+                                    } else {
+                                      const baseValStr = customColumnValues[boqItem.id]?.[0]?.[baseSource] || "0";
+                                      baseVal = parseFloat(baseValStr) || 0;
+                                    }
+
+                                    if (operator === "%") valNum = baseVal * (multiplier / 100);
+                                    else if (operator === "*") valNum = baseVal * multiplier;
+                                    else if (operator === "/") valNum = multiplier !== 0 ? baseVal / multiplier : 0;
+                                    else if (operator === "+") valNum = baseVal + multiplier;
                                   } else {
-                                    val = customColumnValues[boqItem.id]?.[0]?.[col.name] || "";
+                                    valNum = parseFloat(customColumnValues[boqItem.id]?.[0]?.[col.name] || "0") || 0;
                                   }
 
-                                  accumulator += parseFloat(val) || 0;
-                                  const itemPct = (itemCol as any).percentageValue || 0;
+                                  rowCalculatedValues[col.name] = valNum;
+                                  accumulator += valNum;
+                                  const displayVal = isCalculated ? valNum.toFixed(2) : (customColumnValues[boqItem.id]?.[0]?.[col.name] || "");
+                                  const itemMultiplier = (itemCol as any).percentageValue || 0;
+                                  const itemOp = (itemCol as any).operator || "%";
 
                                   return (
                                     <td key={`${col.name}-${idx}`} className="border-r px-3 py-2 bg-purple-50/10 relative group/cell align-middle">
@@ -2194,14 +2294,26 @@ export default function FinalizeBoq() {
                                             <input
                                               type="number"
                                               className="w-14 h-8 bg-white border-2 border-purple-400 rounded-md px-1.5 text-[12px] font-black text-purple-800 outline-none text-right shadow-sm focus:ring-2 ring-purple-600/30"
-                                              value={itemPct}
+                                              value={itemMultiplier}
                                               disabled={isVersionSubmitted}
                                               onChange={(e) => {
-                                                const newPct = parseFloat(e.target.value) || 0;
-                                                handleItemCalculation(boqItem.id, col.name, newPct);
+                                                const newVal = parseFloat(e.target.value) || 0;
+                                                handleItemCalculation(boqItem.id, col.name, newVal, itemOp);
                                               }}
                                             />
-                                            <span className="text-[10px] font-black text-purple-600 uppercase tracking-widest">%</span>
+                                            <select
+                                              className="bg-white border border-purple-300 rounded text-[9px] font-black text-purple-700 outline-none h-6 px-1 cursor-pointer"
+                                              value={itemOp}
+                                              disabled={isVersionSubmitted}
+                                              onChange={(e) => {
+                                                handleItemCalculation(boqItem.id, col.name, itemMultiplier, e.target.value);
+                                              }}
+                                            >
+                                              <option value="%">%</option>
+                                              <option value="*">×</option>
+                                              <option value="/">÷</option>
+                                              <option value="+">+</option>
+                                            </select>
                                           </div>
                                           <span className="text-[8px] px-1.5 py-0.5 bg-purple-600 text-white rounded font-black uppercase tracking-wider truncate max-w-[80px] shadow-sm">
                                             {(() => {
@@ -2219,7 +2331,7 @@ export default function FinalizeBoq() {
                                       <input
                                         type="number"
                                         disabled={isVersionSubmitted || isCalculated}
-                                        value={val}
+                                        value={displayVal}
                                         onChange={e => setCustomColumnValues(prev => ({
                                           ...prev,
                                           [boqItem.id]: {

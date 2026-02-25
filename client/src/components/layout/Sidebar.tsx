@@ -236,12 +236,16 @@ export function Sidebar() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {/* Dashboard Link - hidden for suppliers */}
+          {/* Overview Section */}
+          <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            Overview
+          </div>
+          {/* Dashboard Link - hidden for suppliers, pre-sales, contractors currently per existing logic */}
           {(!isPreSales && !isContractor && user?.role !== "supplier") && (
             <Link href="/dashboard">
               <span
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-2 cursor-pointer",
                   location === "/dashboard"
                     ? "bg-sidebar-primary text-sidebar-primary-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent",
@@ -253,26 +257,85 @@ export function Sidebar() {
             </Link>
           )}
 
-          {isPreSales && (
+          {/* Creations Section */}
+          {(isAdminOrSoftwareOrPurchaseTeam || isPreSales) && (
             <>
-              <Link href="/admin/dashboard?tab=create-product">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                    location === "/admin/dashboard?tab=create-product"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Create Product
-                </span>
-              </Link>
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Creations
+              </div>
+              {isAdminOrSoftwareOrPurchaseTeam && !isPreSales && !isContractor && (
+                <Link href="/admin/dashboard?tab=materials">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      currentAdminTab === "materials"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent",
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Package className="h-4 w-4" /> Create Item
+                  </span>
+                </Link>
+              )}
+              {(isAdminOrSoftwareOrPurchaseTeam || isPreSales) && (
+                <Link href="/admin/dashboard?tab=create-product">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      (currentAdminTab === "create-product" || location === "/admin/dashboard?tab=create-product")
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent",
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Package className="h-4 w-4" /> Create Product
+                  </span>
+                </Link>
+              )}
+              {canCreateBOQAndProject && (
+                <Link href="/create-project">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      location === "/create-project"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent",
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Building2 className="h-4 w-4" /> Create Project
+                  </span>
+                </Link>
+              )}
+              {isAdminOrSoftwareOrPurchaseTeam && !isPreSales && !isContractor && (
+                <Link href="/admin/vendor-categories">
+                  <span
+                    className={cn(
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                      location === "/admin/vendor-categories"
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent",
+                    )}
+                    onClick={() => setIsOpen(false)}
+                  >
+                    <Tags className="h-4 w-4" /> Create Vendor Category
+                  </span>
+                </Link>
+              )}
+            </>
+          )}
 
+          {/* Management Section */}
+          {(isAdminOrSoftwareOrPurchaseTeam || isPreSales) && (
+            <>
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Management
+              </div>
               <Link href="/admin/manage-product">
                 <span
                   className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                     location === "/admin/manage-product"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
@@ -282,157 +345,109 @@ export function Sidebar() {
                   <Package className="h-4 w-4" /> Manage Product
                 </span>
               </Link>
+              {isAdminOrSoftwareOrPurchaseTeam && !isPreSales && !isContractor && (
+                <>
+                  <Link href="/admin/manage-materials">
+                    <span
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        location === "/admin/manage-materials"
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent",
+                      )}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Package className="h-4 w-4" /> Manage Materials
+                    </span>
+                  </Link>
 
+                  <Link href="/admin/dashboard?tab=shops">
+                    <span
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        currentAdminTab === "shops"
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent",
+                      )}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Building2 className="h-4 w-4" /> Manage Shops
+                    </span>
+                  </Link>
 
+                  <Link href="/admin/manage-categories">
+                    <span
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        location === "/admin/manage-categories"
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent",
+                      )}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Tags className="h-4 w-4" /> Manage Categories
+                    </span>
+                  </Link>
 
-              <Link href="/create-project">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-2 cursor-pointer",
-                    location === "/create-project"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Building2 className="h-4 w-4" /> Create Project
-                </span>
-              </Link>
+                  <Link href="/admin/bulk-material-upload">
+                    <span
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        location === "/admin/bulk-material-upload"
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent",
+                      )}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Package className="h-4 w-4" /> Bulk Upload
+                    </span>
+                  </Link>
+                </>
+              )}
+            </>
+          )}
 
+          {/* BOQ / Projects Section */}
+          {isAdminOrSoftware && (
+            <>
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                BOQ / Projects
+              </div>
               <Link href="/create-bom">
                 <span
                   className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                     location === "/create-bom"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
                   )}
                   onClick={() => setIsOpen(false)}
                 >
-                  <ShoppingCart className="h-4 w-4" /> Create BOM
+                  <ShoppingCart className="h-4 w-4" /> Generate BOM
+                </span>
+              </Link>
+              <Link href="/finalize-bom">
+                <span
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    location === "/finalize-bom"
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent",
+                  )}
+                  onClick={() => setIsOpen(false)}
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Finalize BOQ
                 </span>
               </Link>
             </>
           )}
 
+          {/* Approvals Section */}
           {isAdminOrSoftwareOrPurchaseTeam && !isPreSales && !isContractor && (
             <>
-              <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Admin
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Approvals
               </div>
-
-              <Link href="/admin/dashboard?tab=materials">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    currentAdminTab === "materials"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Create Item
-                </span>
-              </Link>
-
-              <Link href="/admin/dashboard?tab=create-product">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    currentAdminTab === "create-product"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Create Product
-                </span>
-              </Link>
-
-              <Link href="/admin/manage-product">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/admin/manage-product"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Manage Product
-                </span>
-              </Link>
-
-              <Link href="/admin/manage-materials">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/admin/manage-materials"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Manage Materials
-                </span>
-              </Link>
-
-              <Link href="/admin/bulk-material-upload">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/admin/bulk-material-upload"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Package className="h-4 w-4" /> Bulk Material Upload
-                </span>
-              </Link>
-
-              <Link href="/admin/vendor-categories">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/admin/vendor-categories"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Tags className="h-4 w-4" /> Vendor Categories
-                </span>
-              </Link>
-
-              <Link href="/admin/manage-categories">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    location === "/admin/manage-categories"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Tags className="h-4 w-4" /> Manage Categories
-                </span>
-              </Link>
-
-              <Link href="/admin/dashboard?tab=shops">
-                <span
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    currentAdminTab === "shops"
-                      ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                      : "text-sidebar-foreground hover:bg-sidebar-accent",
-                  )}
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Building2 className="h-4 w-4" /> Manage Shops
-                </span>
-              </Link>
-
               <Link href="/admin/dashboard?tab=approvals">
                 <span
                   className={cn(
@@ -487,11 +502,18 @@ export function Sidebar() {
                   </span>
                 </Link>
               )}
-
+            </>
+          )}
+          {/* Communication Section */}
+          {isAdminOrSoftwareOrPurchaseTeam && !isPreSales && !isContractor && (
+            <>
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Communication
+              </div>
               <Link href="/admin/dashboard?tab=messages">
                 <span
                   className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                     currentAdminTab === "messages"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
@@ -506,64 +528,13 @@ export function Sidebar() {
                   )}
                 </span>
               </Link>
-
-              {/* Create Project / Create BOQ for Admin */}
-              {isAdminOnly && (
-                <>
-                  <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Projects
-                  </div>
-                  <Link href="/create-project">
-                    <span
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                        location === "/create-project"
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent",
-                      )}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Building2 className="h-4 w-4" /> Create Project
-                    </span>
-                  </Link>
-
-                  <Link href="/create-bom">
-                    <span
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                        location === "/create-bom"
-                          ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent",
-                      )}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <ShoppingCart className="h-4 w-4" /> Create BOM
-                    </span>
-                  </Link>
-                </>
-              )}
-
-              {isAdminOrSoftware && (
-                <Link href="/finalize-bom">
-                  <span
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
-                      location === "/finalize-bom"
-                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                        : "text-sidebar-foreground hover:bg-sidebar-accent",
-                    )}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <CheckCircle2 className="h-4 w-4" /> Finalize BOQ
-                  </span>
-                </Link>
-              )}
             </>
           )}
 
+          {/* Supplier Role Sections */}
           {!isPreSales && !isContractor && user?.role === "supplier" ? (
             <>
-              <div className="px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <div className="px-3 mb-2 mt-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Supplier
               </div>
               <Link href="/supplier/shops">
@@ -582,7 +553,7 @@ export function Sidebar() {
               <Link href="/supplier/materials">
                 <span
                   className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-4 cursor-pointer",
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
                     location === "/supplier/materials"
                       ? "bg-sidebar-primary text-sidebar-primary-foreground"
                       : "text-sidebar-foreground hover:bg-sidebar-accent",
@@ -595,9 +566,7 @@ export function Sidebar() {
             </>
           ) : null}
 
-
-
-          {/* Other Links */}
+          {/* Other Resources Section */}
           {!isPreSales && !isContractor && (
             <>
               <div className="mt-6 px-3 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
